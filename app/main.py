@@ -1,6 +1,15 @@
 from fastapi import FastAPI
 from app.core.config import settings
 from app.api.v1 import attendance, auth, schedule, karyawan
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
+import os
+from dotenv import load_dotenv
+
+DATABASE_URL = os.getenv("DATABASE_URL")
+
+engine = create_engine(DATABASE_URL)
+SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 app = FastAPI(title=settings.APP_NAME)
 
