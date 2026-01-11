@@ -87,10 +87,8 @@ def login(data: LoginRequest, db: Session = Depends(get_db)):
         raise HTTPException(403, "Email belum diverifikasi")
 
     token = create_token(
-        data={
-            "user_id": str(user.id),
-            "email": user.email
-    }
+        {"user_id": str(user.id)},
+        ACCESS_TOKEN_EXPIRE_MINUTES
     )
 
     return {
