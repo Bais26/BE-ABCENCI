@@ -1,0 +1,4 @@
+Email: baisyufan2004@gmail.com
+Token: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJlbWFpbCI6ImJhaXN5dWZhbjIwMDRAZ21haWwuY29tIiwidHlwZSI6InZlcmlmaWNhdGlvbiIsImV4cCI6MTc2ODcwNTkwMH0.QzWRyK8IVu4_k5xsHRlYqGznLfV37hU8dKXQPbAyM9g
+URL: http://127.0.0.1:8000/api/v1/auth/verify?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJlbWFpbCI6ImJhaXN5dWZhbjIwMDRAZ21haWwuY29tIiwidHlwZSI6InZlcmlmaWNhdGlvbiIsImV4cCI6MTc2ODcwNTkwMH0.QzWRyK8IVu4_k5xsHRlYqGznLfV37hU8dKXQPbAyM9g
+Created: 2026-01-18 09:41:45.653950
