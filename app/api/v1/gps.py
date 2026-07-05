@@ -7,7 +7,7 @@ from app.services.gps import GPSValidationService
 from app.utils.security import get_current_user, get_current_admin
 from app.models.user import User
 
-router = APIRouter(prefix="/gps", tags=["gps"])
+router = APIRouter(tags=["gps"])
 
 class GPSValidationRequest(BaseModel):
     user_latitude: float = Field(..., ge=-90, le=90)

@@ -25,7 +25,7 @@ class RekapSummary(BaseModel):
     filter_type: str                      # week / month / year
     total_hari_kerja: int
     total_hadir: int
-    total_absen: int
+    total_alfa: int
     total_wfo: int
     total_wfh: int
     total_ontime: int
@@ -49,7 +49,7 @@ class KaryawanRekapItem(BaseModel):
     posisi: Optional[str]
     divisi: Optional[str]
     total_hadir: int
-    total_absen: int
+    total_alfa: int
     total_wfo: int
     total_wfh: int
     total_ontime: int

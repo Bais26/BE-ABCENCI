@@ -1,13 +1,14 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
-from typing import List
+from typing import List, Optional
 import uuid
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, date
 import logging
 
 from app.services.rekap import JAKARTA_TZ # Impor zona waktu
 from app.core.database import get_db
 from app.schemas.schedule import (
+    BaseModel,
     OfficeLocationCreate, OfficeLocationResponse,
     GenerateScheduleRequest,
     TestNotificationRequest
@@ -21,7 +22,19 @@ from app.services.notification_service import send_notification
 # Konfigurasi logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
-router = APIRouter(prefix="/schedule", tags=["schedule"])
+
+# Skema untuk update jadwal per hari (sebaiknya diletakkan di app/schemas/schedule.py)
+class UpdateDayScheduleRequest(BaseModel):
+    user_id: uuid.UUID
+    date: date
+    work_status: str # "WFO", "WFH", atau "OFF"
+    office_location_id: Optional[uuid.UUID] = None
+
+class UpdateBatchScheduleRequest(BaseModel):
+    schedules: List[UpdateDayScheduleRequest]
+
+
+router = APIRouter(tags=["schedule"])
 
 @router.post("/test-notification")
 async def test_notification(
@@ -462,6 +475,131 @@ async def generate_schedule(
             detail=f"Gagal mengenerate jadwal: {str(e)}"
         )
         
+@router.put("/update-day", response_model=OfficeLocationResponse)
+async def update_day_schedule(
+    update_data: UpdateDayScheduleRequest,
+    current_user: User = Depends(get_current_admin),
+    db: Session = Depends(get_db)
+):
+    """
+    Admin: Mengubah jadwal satu karyawan pada tanggal spesifik.
+    Hanya mengubah satu entri, tidak meng-generate ulang semua.
+    """
+    logger.info(f"Mencoba mengubah jadwal untuk user {update_data.user_id} pada tanggal {update_data.date}")
+
+    # 1. Validasi input
+    valid_statuses = ["WFO", "WFH", "OFF"]
+    if update_data.work_status.upper() not in valid_statuses:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Status kerja tidak valid. Gunakan salah satu dari: {valid_statuses}"
+        )
+
+    # 2. Cari jadwal yang ada untuk user dan tanggal tersebut
+    schedule_to_update = db.query(WorkSchedule).filter(
+        WorkSchedule.user_id == update_data.user_id,
+        WorkSchedule.date == update_data.date
+    ).first()
+
+    if not schedule_to_update:
+        # Jika tidak ada, buat jadwal baru untuk hari itu
+        logger.info(f"Jadwal tidak ditemukan, membuat entri baru untuk user {update_data.user_id} pada {update_data.date}")
+        schedule_to_update = WorkSchedule(
+            user_id=update_data.user_id,
+            date=update_data.date,
+        )
+        db.add(schedule_to_update)
+
+    # 3. Update data jadwal
+    schedule_to_update.work_status = update_data.work_status.upper()
+    if schedule_to_update.work_status == "WFO":
+        # Otomatis cari lokasi WFO yang aktif
+        default_office = db.query(OfficeLocation).filter(OfficeLocation.is_active == True).first()
+        if not default_office:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Tidak ada lokasi kantor (WFO) yang aktif di sistem. Silakan tambahkan lokasi terlebih dahulu."
+            )
+        schedule_to_update.office_location_id = default_office.id
+    else:
+        # Hapus office_location_id jika statusnya bukan WFO
+        schedule_to_update.office_location_id = None
+
+    try:
+        db.commit()
+        db.refresh(schedule_to_update)
+        logger.info(f"Jadwal untuk user {update_data.user_id} pada {update_data.date} berhasil diubah menjadi {schedule_to_update.work_status}")
+    except Exception as e:
+        db.rollback()
+        logger.error(f"Gagal menyimpan perubahan jadwal: {e}")
+        raise HTTPException(status_code=500, detail=f"Gagal menyimpan perubahan: {str(e)}")
+
+    return schedule_to_update
+
+@router.put("/update-batch")
+async def update_batch_schedule(
+    update_data: UpdateBatchScheduleRequest,
+    current_user: User = Depends(get_current_admin),
+    db: Session = Depends(get_db)
+):
+    """
+    Admin: Mengubah beberapa jadwal karyawan sekaligus dalam satu request.
+    """
+    updated_count = 0
+    created_count = 0
+    logger.info(f"Memulai proses batch update untuk {len(update_data.schedules)} jadwal.")
+
+    try:
+        for item in update_data.schedules:
+            # 1. Validasi input untuk setiap item
+            valid_statuses = ["WFO", "WFH", "OFF"]
+            if item.work_status.upper() not in valid_statuses:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Item dengan user {item.user_id} pada {item.date} memiliki status tidak valid: {item.work_status}"
+                )
+
+            # 2. Cari jadwal yang ada
+            schedule_to_update = db.query(WorkSchedule).filter(
+                WorkSchedule.user_id == item.user_id,
+                WorkSchedule.date == item.date
+            ).first()
+
+            if not schedule_to_update:
+                # Jika tidak ada, buat jadwal baru
+                schedule_to_update = WorkSchedule(
+                    user_id=item.user_id,
+                    date=item.date,
+                )
+                db.add(schedule_to_update)
+                created_count += 1
+            else:
+                updated_count += 1
+
+            # 3. Update data jadwal
+            schedule_to_update.work_status = item.work_status.upper()
+            if schedule_to_update.work_status == "WFO":
+                # Otomatis cari lokasi WFO yang aktif
+                default_office = db.query(OfficeLocation).filter(OfficeLocation.is_active == True).first()
+                if not default_office:
+                    raise HTTPException(
+                        status_code=status.HTTP_404_NOT_FOUND,
+                        detail="Tidak ada lokasi kantor (WFO) yang aktif di sistem. Silakan tambahkan lokasi terlebih dahulu."
+                    )
+                schedule_to_update.office_location_id = default_office.id
+            else:
+                # Hapus office_location_id jika statusnya bukan WFO
+                schedule_to_update.office_location_id = None
+
+        db.commit()
+        logger.info(f"Batch update berhasil: {updated_count} jadwal diubah, {created_count} jadwal baru dibuat.")
+    except Exception as e:
+        db.rollback()
+        logger.error(f"Gagal melakukan batch update jadwal: {e}")
+        raise HTTPException(status_code=500, detail=f"Gagal menyimpan perubahan: {str(e)}")
+
+    return {"message": f"Operasi berhasil. {updated_count} jadwal diubah dan {created_count} jadwal baru dibuat."}
+
 @router.get("/my-schedule")
 async def get_my_schedule(
     start_date: datetime = None,
@@ -641,6 +779,7 @@ async def get_all_schedules(
         
         result["data"].append({
             "id": f"CBN{index:03d}",
+            "user_id": user.id,  # Tambahkan UUID user di sini
             "nama": user.full_name,
             "jabatan": jabatan_display,
             "status": "Aktif",
@@ -648,6 +787,80 @@ async def get_all_schedules(
         })
     
     return result
+
+@router.get("/{user_id}")
+async def get_user_schedule_by_id(
+    user_id: uuid.UUID,
+    start_date: datetime = None,
+    end_date: datetime = None,
+    current_user: User = Depends(get_current_admin),
+    db: Session = Depends(get_db)
+):
+    """
+    Admin: Get work schedule for a specific user by their ID.
+    """
+    
+    # 1. Cari user berdasarkan ID
+    target_user = db.query(User).filter(User.id == user_id).first()
+    if not target_user:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"User dengan ID {user_id} tidak ditemukan."
+        )
+
+    # 2. Default tanggal ke minggu ini jika tidak ada
+    if not start_date or not end_date:
+        today = datetime.now(JAKARTA_TZ)
+        start_date = today.replace(hour=0, minute=0, second=0, microsecond=0)
+        # Set ke hari Senin minggu ini
+        start_date = start_date - timedelta(days=start_date.weekday())
+        end_date = start_date + timedelta(days=6)
+    
+    # 3. Query jadwal kerja user
+    schedules = db.query(WorkSchedule).filter(
+        WorkSchedule.user_id == user_id,
+        WorkSchedule.date >= start_date,
+        WorkSchedule.date <= end_date
+    ).order_by(WorkSchedule.date).all()
+    
+    # 4. Hitung statistik
+    total_wfo = sum(1 for s in schedules if s.work_status == "WFO")
+    total_wfh = sum(1 for s in schedules if s.work_status == "WFH")
+    total_off = sum(1 for s in schedules if s.work_status == "OFF")
+    
+    # 5. Format response dengan detail
+    hari_indonesia = {0: "Senin", 1: "Selasa", 2: "Rabu", 3: "Kamis", 4: "Jumat", 5: "Sabtu", 6: "Minggu"}
+    
+    schedules_by_date = []
+    for schedule in schedules:
+        office_location = None
+        if schedule.office_location_id:
+            office_location = db.query(OfficeLocation).filter(OfficeLocation.id == schedule.office_location_id).first()
+        
+        schedules_by_date.append({
+            "id": schedule.id,
+            "tanggal": schedule.date,
+            "hari": hari_indonesia[schedule.date.weekday()],
+            "work_status": schedule.work_status,
+            "keterangan": get_status_description(schedule.work_status),
+            "office_location": {
+                "id": office_location.id,
+                "name": office_location.name,
+                "address": office_location.address
+            } if office_location else None
+        })
+    
+    return {
+        "user": {
+            "id": target_user.id,
+            "nama": target_user.full_name,
+            "jabatan": get_user_position(target_user),
+        },
+        "periode": {"start_date": start_date.date(), "end_date": end_date.date()},
+        "statistik": {"total_hari": len(schedules), "WFO": total_wfo, "WFH": total_wfh, "OFF": total_off},
+        "detail_schedule": schedules_by_date,
+    }
+
 
 # ============ OPTIONAL: SIMPLE GENERATE ENDPOINT ============
 @router.post("/generate-simple")

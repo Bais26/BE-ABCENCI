@@ -7,6 +7,7 @@ from app.core.database import get_db
 from app.utils.security import get_current_user, get_current_admin
 from app.models.user import User
 from app.models.attendance import Attendance, LocationType
+from app.models.karyawan_detail import KaryawanDetail
 from app.schemas.rekap import MyRekapResponse, AdminRekapResponse
 from app.services.rekap import (
     get_date_range,
@@ -147,40 +148,49 @@ async def get_admin_rekap(
 
         total_karyawan = len(all_users)
 
-        # ── 2. Pagination pada list user ──
-        offset = (page - 1) * limit
-        paged_users = all_users[offset: offset + limit]
-        paged_ids = [u.id for u in paged_users]
-
-        # ── 3. Ambil attendance dalam periode untuk user di halaman ini ──
-        att_query = db.query(Attendance).filter(
-            Attendance.user_id.in_(paged_ids),
+        # ── 2. Ambil SEMUA attendance untuk SEMUA user yang cocok filter (untuk summary) ──
+        all_user_ids = [u.id for u in all_users]
+        summary_att_query = db.query(Attendance).filter(
+            Attendance.user_id.in_(all_user_ids),
             Attendance.date >= datetime.combine(start, datetime.min.time()),
             Attendance.date <= datetime.combine(end, datetime.max.time()),
         )
-
         if work_status:
             loc = LocationType.WFO if work_status == "WFO" else LocationType.WFH
-            att_query = att_query.filter(Attendance.work_status == loc)
+            summary_att_query = summary_att_query.filter(Attendance.work_status == loc)
+        
+        all_attendances_for_summary = summary_att_query.all()
 
-        all_attendances = att_query.all()
+        # ── 3. Hitung summary berdasarkan data keseluruhan ──
+        # Kalkulasi total alfa agregat untuk summary
+        karyawan_cuti = sum(1 for u in all_users if u.karyawan_detail and u.karyawan_detail.status == 'Cuti')
 
-        # ── 4. Kelompokkan attendance per user ──
+        total_hari_kerja_periode = count_working_days(start, end)
+        # Total hari kerja yang diharapkan adalah untuk karyawan yang tidak cuti
+        total_expected_workdays_all_users = total_hari_kerja_periode * (total_karyawan - karyawan_cuti)
+        total_actual_attendances_all_users = len(all_attendances_for_summary)
+        total_alfa_agregat = max(0, total_expected_workdays_all_users - total_actual_attendances_all_users)
+
+        # Buat summary dengan data agregat
+        summary = build_summary(all_attendances_for_summary, start, end, label, filter)
+        summary.total_alfa = total_alfa_agregat # Timpa total_alfa dengan nilai agregat yang lebih akurat
+
+        # ── 4. Pagination pada list user untuk tampilan per halaman ──
+        offset = (page - 1) * limit
+        paged_users = all_users[offset: offset + limit]
+
+        # ── 5. Kelompokkan attendance per user (dari data summary) untuk efisiensi ──
         att_by_user: dict = {u.id: [] for u in paged_users}
-        for a in all_attendances:
+        for a in all_attendances_for_summary:
             if a.user_id in att_by_user:
                 att_by_user[a.user_id].append(a)
 
+        # ── 6. Bangun list rekap per karyawan untuk halaman saat ini ──
         total_hari_kerja = count_working_days(start, end)
-
-        # ── 5. Bangun list rekap per karyawan ──
         karyawan_list = [
             build_karyawan_item(user, att_by_user.get(user.id, []), total_hari_kerja)
             for user in paged_users
         ]
-
-        # ── 6. Summary agregat semua attendance di halaman ini ──
-        summary = build_summary(all_attendances, start, end, label, filter)
 
         return AdminRekapResponse(
             summary=summary,

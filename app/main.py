@@ -1,6 +1,6 @@
 from fastapi import FastAPI
 from app.core.config import settings
-from app.api.v1 import attendance, auth, schedule, karyawan, gps, rekap
+from app.api.v1 import attendance, auth, schedule, karyawan, gps, rekap, dashboard
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 import os
@@ -32,22 +32,19 @@ app = FastAPI(
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:3000",
-        "http://127.0.0.1:3000",
-        "https://your-frontend-domain.vercel.app",
-    ],
-    allow_credentials=False,
+    allow_origins=settings.CORS_ORIGINS,
+    allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
 app.include_router(auth.router, prefix="/api/v1/auth", tags=["Auth"])
 app.include_router(attendance.router, prefix="/api/v1/attendance", tags=["Attendance"])
-app.include_router(schedule.router, prefix="/api/v1", tags=["Schedule"])
-app.include_router(karyawan.router, prefix="/api/v1", tags=["Karyawan"])
-app.include_router(gps.router, prefix="/api/v1", tags=["gps"])
+app.include_router(schedule.router, prefix="/api/v1/schedule", tags=["Schedule"])
+app.include_router(karyawan.router, prefix="/api/v1/karyawan", tags=["Karyawan"])
+app.include_router(gps.router, prefix="/api/v1/gps", tags=["gps"])
 app.include_router(rekap.router, prefix="/api/v1/absens", tags=["Rekap"])
+app.include_router(dashboard.router, prefix="/api/v1/dashboard", tags=["Dashboard"])
 
 @app.get("/")
 def root():

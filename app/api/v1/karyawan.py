@@ -10,7 +10,7 @@ from app.models import User, KaryawanDetail, UserRole
 from app.schemas.auth import UserWithDetailResponse, UserResponse, KaryawanDetailResponse, KaryawanDetailCreate, KaryawanDetailUpdate, PaginatedKaryawanResponse, PaginationMeta
 # from app.dependencies import get_current_user, get_current_admin_user  # Untuk authentication
 
-router = APIRouter(prefix="/karyawan", tags=["Karyawan"])
+router = APIRouter(tags=["Karyawan"])
 
 
 # =====================================
@@ -52,39 +52,41 @@ def get_all_karyawan(
     ).filter(User.role == UserRole.KARYAWAN.value)
     
     # ✅ FILTERING
+    needs_detail_join = False
     if search:
         search_filter = or_(
             User.full_name.ilike(f"%{search}%"),
             User.email.ilike(f"%{search}%")
         )
         query = query.filter(search_filter)
-    
     if status:
-        # Join dengan karyawan_details untuk filter by status
-        query = query.join(KaryawanDetail, User.id == KaryawanDetail.user_id, isouter=True)
+        needs_detail_join = True
         query = query.filter(KaryawanDetail.status == status)
-    
     if posisi:
-        # Join dengan karyawan_details untuk filter by posisi
-        if not status:  # Avoid double join
-            query = query.join(KaryawanDetail, User.id == KaryawanDetail.user_id, isouter=True)
+        needs_detail_join = True
         query = query.filter(KaryawanDetail.posisi.ilike(f"%{posisi}%"))
+    if needs_detail_join:
+        query = query.join(KaryawanDetail, User.id == KaryawanDetail.user_id, isouter=True)
     
     # ✅ SORTING
+    sort_field_map = {
+        "full_name": User.full_name,
+        "email": User.email,
+        "created_at": User.created_at,
+        "posisi": KaryawanDetail.posisi,
+        "status": KaryawanDetail.status,
+    }
+
+    # Jika sorting butuh join ke KaryawanDetail, pastikan join ada
+    if sort_by in ["posisi", "status"] and not needs_detail_join:
+        query = query.join(KaryawanDetail, User.id == KaryawanDetail.user_id, isouter=True)
+
+    sort_column = sort_field_map.get(sort_by, User.created_at)
+
     if sort_order.lower() == "desc":
-        if sort_by == "full_name":
-            query = query.order_by(User.full_name.desc())
-        elif sort_by == "email":
-            query = query.order_by(User.email.desc())
-        else:  # default: created_at
-            query = query.order_by(User.created_at.desc())
-    else:  # asc
-        if sort_by == "full_name":
-            query = query.order_by(User.full_name.asc())
-        elif sort_by == "email":
-            query = query.order_by(User.email.asc())
-        else:  # default: created_at
-            query = query.order_by(User.created_at.asc())
+        query = query.order_by(sort_column.desc())
+    else:
+        query = query.order_by(sort_column.asc())
     
     # ✅ COUNT TOTAL (before pagination)
     total = query.count()

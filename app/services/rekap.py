@@ -125,7 +125,10 @@ def build_summary(
 ) -> RekapSummary:
     total_hari_kerja = count_working_days(start, end)
     total_hadir = len(attendances)
-    total_absen = max(0, total_hari_kerja - total_hadir)
+    # Untuk summary, 'total_alfa' dihitung dari selisih hari kerja dan total kehadiran.
+    # Pada rekap admin, ini akan menjadi total absensi dari semua karyawan yang difilter.
+    # Pada rekap personal, ini akan menjadi total alfa untuk satu karyawan.
+    total_alfa = max(0, total_hari_kerja - total_hadir)
     wfo = sum(1 for a in attendances if a.work_status == LocationType.WFO)
     wfh = sum(1 for a in attendances if a.work_status == LocationType.WFH)
     ontime = sum(1 for a in attendances if a.check_in_status == AttendanceStatus.ONTIME)
@@ -143,7 +146,7 @@ def build_summary(
         filter_type=filter_type,
         total_hari_kerja=total_hari_kerja,
         total_hadir=total_hadir,
-        total_absen=total_absen,
+        total_alfa=total_alfa,
         total_wfo=wfo,
         total_wfh=wfh,
         total_ontime=ontime,
@@ -226,7 +229,7 @@ def build_karyawan_item(
 ) -> KaryawanRekapItem:
     detail = user.karyawan_detail
     total_hadir = len(attendances)
-    total_absen = max(0, total_hari_kerja - total_hadir)
+    total_alfa = max(0, total_hari_kerja - total_hadir)
     wfo = sum(1 for a in attendances if a.work_status == LocationType.WFO)
     wfh = sum(1 for a in attendances if a.work_status == LocationType.WFH)
     ontime = sum(1 for a in attendances if a.check_in_status == AttendanceStatus.ONTIME)
@@ -246,7 +249,7 @@ def build_karyawan_item(
         posisi=detail.posisi if detail else None,
         divisi=detail.division.name if (detail and detail.division) else None,
         total_hadir=total_hadir,
-        total_absen=total_absen,
+        total_alfa=total_alfa,
         total_wfo=wfo,
         total_wfh=wfh,
         total_ontime=ontime,

@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 from jose import jwt, ExpiredSignatureError, JWTError
 from app.core.database import get_db
 from app.models.user import User

@@ -104,6 +104,9 @@ class KaryawanDetailUpdate(KaryawanDetailBase):
 class DivisionResponse(BaseModel):
     id: UUID
     name: str
+    
+    class Config:
+        from_attributes = True
 
 class KaryawanDetailResponse(KaryawanDetailBase):
     id: UUID  # ✅ UUID instead of int
