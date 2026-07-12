@@ -1,14 +1,7 @@
-# app/models/__init__.py
-
-from .user import User, KaryawanDetail, UserRole
+from .user import User, UserRole
+from .karyawan_detail import KaryawanDetail
+from .division import Division, SubDivision
+from .schedule import OfficeLocation, WorkSchedule
 from .attendance import Attendance
-from .schedule import WorkSchedule, OfficeLocation
 
-__all__ = [
-    "User",
-    "KaryawanDetail",
-    "UserRole",
-    "Attendance",
-    "WorkSchedule",
-    "OfficeLocation",
-]
+# Impor model lain jika ada di sini

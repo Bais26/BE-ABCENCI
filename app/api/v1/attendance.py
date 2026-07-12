@@ -759,7 +759,7 @@ async def get_all_attendance_admin(
     """
     
     try:
-        query = db.query(Attendance)
+        query = db.query(Attendance).options(joinedload(Attendance.user))
         
         # Apply filters
         if start_date:
@@ -783,25 +783,20 @@ async def get_all_attendance_admin(
         offset = (page - 1) * limit
         attendances = query.order_by(Attendance.date.desc()).offset(offset).limit(limit).all()
         
+        # ✅ Buat peta lokasi kantor untuk menghindari N+1 query
+        office_ids = {att.office_location_id for att in attendances if att.office_location_id}
+        office_map = {o.id: o.name for o in db.query(OfficeLocation).filter(OfficeLocation.id.in_(office_ids))} if office_ids else {}
+
         # Format response
         result = []
         for att in attendances:
-            # Get user info
-            user = db.query(User).filter(User.id == att.user_id).first()
-            office_name = None
-            
-            if att.office_location_id:
-                office = db.query(OfficeLocation).filter(
-                    OfficeLocation.id == att.office_location_id
-                ).first()
-                office_name = office.name if office else None
-            
+            office_name = office_map.get(att.office_location_id)
             result.append({
                 "id": att.id,
                 "date": att.date,
                 "user_id": att.user_id,
-                "user_name": user.full_name if user else "Unknown",
-                "user_email": user.email if user else "Unknown",
+                "user_name": att.user.full_name if att.user else "Unknown",
+                "user_email": att.user.email if att.user else "Unknown",
                 "check_in_time": att.check_in_time,
                 "check_out_time": att.check_out_time,
                 "work_status": att.work_status,

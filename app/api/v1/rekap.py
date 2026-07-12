@@ -7,6 +7,7 @@ from app.core.database import get_db
 from app.utils.security import get_current_user, get_current_admin
 from app.models.user import User
 from app.models.attendance import Attendance, LocationType
+# from app.models import Attendance, LocationType, SubDivision, Division
 from app.models.karyawan_detail import KaryawanDetail
 from app.schemas.rekap import MyRekapResponse, AdminRekapResponse
 from app.services.rekap import (
@@ -32,7 +33,7 @@ router = APIRouter()
 async def get_my_rekap(
     filter: str = Query(
         "month",
-        regex="^(week|month|year)$",
+        pattern="^(week|month|year)$",
         description="Periode: week | month | year",
     ),
     year: Optional[int] = Query(None, ge=2000, le=2100, description="Tahun (default: tahun ini)"),
@@ -97,20 +98,27 @@ async def get_admin_rekap(
     # ── filter periode ──
     filter: str = Query(
         "month",
-        regex="^(week|month|year)$",
+        pattern="^(week|month|year)$", # Menggunakan pattern sudah benar
         description="Periode: week | month | year",
     ),
     year: Optional[int] = Query(None, ge=2000, le=2100),
     month: Optional[int] = Query(None, ge=1, le=12),
     week: Optional[int] = Query(None, ge=1, le=53),
     # ── filter karyawan ──
-    nama: Optional[str] = Query(None, description="Cari sebagian nama karyawan (case-insensitive)"),
+    nama_lengkap: Optional[str] = Query(
+        None, description="Cari sebagian nama karyawan (case-insensitive)"
+    ),
     email: Optional[str] = Query(None, description="Cari sebagian email"),
     divisi: Optional[str] = Query(None, description="Nama divisi (case-insensitive)"),
-    posisi: Optional[str] = Query(None, description="Posisi / jabatan (case-insensitive)"),
+    subdivisi: Optional[str] = Query(
+        None, description="Nama subdivisi (case-insensitive)"
+    ),
+    posisi: Optional[str] = Query(
+        None, description="Posisi / jabatan (case-insensitive)"
+    ),
     user_id: Optional[str] = Query(None, description="UUID spesifik karyawan"),
     work_status: Optional[str] = Query(
-        None, regex="^(WFO|WFH)$", description="Filter WFO atau WFH"
+        None, pattern="^(WFO|WFH)$", # Menggunakan pattern sudah benar
     ),
     # ── pagination ──
     limit: int = Query(50, ge=1, le=200),
@@ -120,7 +128,7 @@ async def get_admin_rekap(
     """
     Rekap kehadiran seluruh karyawan — **Admin only**.
 
-    **Filter karyawan:** `nama`, `email`, `divisi`, `posisi`, `user_id`
+    **Filter karyawan:** `nama_lengkap`, `email`, `divisi`, `subdivisi`, `posisi`, `user_id`
     **Filter periode:** `filter` + `year` / `month` / `week`
     **Filter status:** `work_status` → WFO | WFH
     **Pagination:** `page` + `limit`
@@ -142,14 +150,18 @@ async def get_admin_rekap(
 
         # ── 1. Query & filter user ──
         try:
-            all_users = query_users(db, user_id, nama, email, divisi, posisi)
+            # Dapatkan objek query, bukan list
+            users_query = query_users(db, user_id, nama_lengkap, email, divisi, subdivisi, posisi)
         except ValueError:
-            raise HTTPException(status_code=400, detail="Format user_id tidak valid (harus UUID)")
+            raise HTTPException(
+                status_code=400, detail="Format user_id tidak valid (harus UUID)"
+            )
 
-        total_karyawan = len(all_users)
+        # Hitung total dari query sebelum pagination
+        total_karyawan = users_query.count()
 
         # ── 2. Ambil SEMUA attendance untuk SEMUA user yang cocok filter (untuk summary) ──
-        all_user_ids = [u.id for u in all_users]
+        all_user_ids = [u.id for u in users_query.all()] # Ambil semua ID untuk summary
         summary_att_query = db.query(Attendance).filter(
             Attendance.user_id.in_(all_user_ids),
             Attendance.date >= datetime.combine(start, datetime.min.time()),
@@ -163,7 +175,7 @@ async def get_admin_rekap(
 
         # ── 3. Hitung summary berdasarkan data keseluruhan ──
         # Kalkulasi total alfa agregat untuk summary
-        karyawan_cuti = sum(1 for u in all_users if u.karyawan_detail and u.karyawan_detail.status == 'Cuti')
+        karyawan_cuti = users_query.join(KaryawanDetail).filter(KaryawanDetail.status == 'Cuti').count()
 
         total_hari_kerja_periode = count_working_days(start, end)
         # Total hari kerja yang diharapkan adalah untuk karyawan yang tidak cuti
@@ -177,7 +189,7 @@ async def get_admin_rekap(
 
         # ── 4. Pagination pada list user untuk tampilan per halaman ──
         offset = (page - 1) * limit
-        paged_users = all_users[offset: offset + limit]
+        paged_users = users_query.offset(offset).limit(limit).all()
 
         # ── 5. Kelompokkan attendance per user (dari data summary) untuk efisiensi ──
         att_by_user: dict = {u.id: [] for u in paged_users}

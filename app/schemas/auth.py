@@ -8,6 +8,7 @@ from pydantic import BaseModel
 
 from fastapi import Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
+from .division import DivisionResponse, SubDivisionResponse
 
 
 class FCMTokenRequest(BaseModel):
@@ -101,17 +102,10 @@ class KaryawanDetailCreate(KaryawanDetailBase):
 class KaryawanDetailUpdate(KaryawanDetailBase):
     pass
 
-class DivisionResponse(BaseModel):
-    id: UUID
-    name: str
-    
-    class Config:
-        from_attributes = True
-
 class KaryawanDetailResponse(KaryawanDetailBase):
     id: UUID  # ✅ UUID instead of int
     user_id: UUID  # ✅ UUID instead of int
-    division: Optional[DivisionResponse] = None
+    subdivision: Optional[SubDivisionResponse] = None
 
     created_at: datetime
     updated_at: Optional[datetime] = None

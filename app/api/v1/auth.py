@@ -2,12 +2,11 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session, joinedload
 from jose import jwt, ExpiredSignatureError, JWTError
 from app.core.database import get_db
-from app.models.user import User
+from app.models import User, UserRole, SubDivision, KaryawanDetail
 from app.schemas.auth import *
 from app.utils.security import *
 from app.core.email import get_mail_client
 from app.core.config import settings
-from app.models.karyawan_detail import KaryawanDetail
 from fastapi_mail import MessageSchema
 
 router = APIRouter()
@@ -43,61 +42,18 @@ def get_my_profile(
     """
 
     user = db.query(User).options(
-        joinedload(User.karyawan_detail).joinedload(KaryawanDetail.division)
+        joinedload(User.karyawan_detail)
+        .joinedload(KaryawanDetail.subdivision)
+        .joinedload(SubDivision.division)
     ).filter(User.id == current_user.id).first()
 
-    # Eager load karyawan_detail (untuk safety)
-    detail = current_user.karyawan_detail
+    if not user:
+        # This case should ideally not happen if token is valid, but as a safeguard:
+        raise HTTPException(status_code=404, detail="User not found")
 
-    karyawan_detail_response = None
-    if detail:
-        from app.schemas.auth import KaryawanDetailResponse
-        karyawan_detail_response = KaryawanDetailResponse(
-            id=detail.id,
-            user_id=detail.user_id,
-            nama_depan=detail.nama_depan,
-            nama_belakang=detail.nama_belakang,
-            division={
-                "id": detail.division.id,
-                "name": detail.division.name
-            } if detail.division else None,
-            tanggal_lahir=detail.tanggal_lahir,
-            jenis_kelamin=detail.jenis_kelamin,
-            tinggi_badan=detail.tinggi_badan,
-            berat_badan=detail.berat_badan,
-            nama_alamat=detail.nama_alamat,
-            alamat_lengkap=detail.alamat_lengkap,
-            detail_alamat=detail.detail_alamat,
-            nama_kontak_darurat=detail.nama_kontak_darurat,
-            hubungan_kontak_darurat=detail.hubungan_kontak_darurat,
-            nomor_telepon_darurat=detail.nomor_telepon_darurat,
-            nama_bank=detail.nama_bank,
-            nomor_rekening=detail.nomor_rekening,
-            nama_pemilik_rekening=detail.nama_pemilik_rekening,
-            posisi=detail.posisi,
-            tanggal_masuk=detail.tanggal_masuk,
-            status=detail.status,
-            created_at=detail.created_at,
-            updated_at=detail.updated_at
-        )
-
-    division_name = None
-    if detail and detail.division:
-        division_name = detail.division.name
-
-    return UserWithDetailResponse(
-        id=current_user.id,
-        full_name=current_user.full_name,
-        email=current_user.email,
-        role=current_user.role,
-        is_active=current_user.is_active,
-        phone_number=current_user.phone_number,
-        address=current_user.address,
-        date_of_birth=current_user.date_of_birth,
-        created_at=current_user.created_at,
-        karyawan_detail=karyawan_detail_response,
-        division_name=division_name
-    )
+    # Cukup kembalikan objek yang dibuat dari ORM.
+    # Pydantic akan secara otomatis membuat struktur JSON yang bersarang dengan benar.
+    return UserWithDetailResponse.from_orm(user)
 
 # REGISTER
 @router.post("/register")
@@ -186,11 +142,13 @@ def login(data: LoginRequest, db: Session = Depends(get_db)):
     if not user.is_active:
         raise HTTPException(403, "Email belum diverifikasi")
 
-    karyawan = user.karyawan_detail
-    division_name = None
+    # Load division and subdivision info
+    user_with_details = db.query(User).options(
+        joinedload(User.karyawan_detail).joinedload(KaryawanDetail.subdivision).joinedload(SubDivision.division)
+    ).filter(User.id == user.id).one()
 
-    if karyawan and karyawan.division:
-        division_name = karyawan.division.name
+    karyawan = user_with_details.karyawan_detail
+    division_name = karyawan.subdivision.division.name if karyawan and karyawan.subdivision and karyawan.subdivision.division else None
 
     token = create_token(
         {
@@ -208,7 +166,7 @@ def login(data: LoginRequest, db: Session = Depends(get_db)):
         "id": user.id,
         "email": user.email,
         "role": user.role,
-        "divisi": division_name
+        "divisi": division_name,
     },
 }
 

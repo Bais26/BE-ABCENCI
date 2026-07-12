@@ -5,7 +5,6 @@ from sqlalchemy.orm import relationship
 from datetime import datetime
 import uuid
 from app.db.base import Base
-from app.models.division import Division
 
 class KaryawanDetail(Base):
     __tablename__ = "karyawan_details"
@@ -34,7 +33,9 @@ class KaryawanDetail(Base):
 
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, onupdate=datetime.utcnow)
-    division_id = Column(UUID(as_uuid=True), ForeignKey("divisions.id"))
-    division = relationship("Division")
+    
+    # Foreign key ke tabel subdivisions
+    subdivision_id = Column(UUID(as_uuid=True), ForeignKey("subdivisions.id"), nullable=True)
+    subdivision = relationship("SubDivision", back_populates="karyawans")
 
     user = relationship("User", back_populates="karyawan_detail")

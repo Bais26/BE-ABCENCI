@@ -150,7 +150,8 @@ class KaryawanRekapItem(BaseModel):
     nama_lengkap: str
     email: str
     posisi: Optional[str]
-    divisi: Optional[str]
+    divisi: Optional[str] # Nama Divisi Induk
+    subdivisi: Optional[str] # Nama Subdivisi
     total_hadir: int
     total_absen: int
     total_wfo: int

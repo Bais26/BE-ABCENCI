@@ -1,6 +1,6 @@
 from fastapi import FastAPI
 from app.core.config import settings
-from app.api.v1 import attendance, auth, schedule, karyawan, gps, rekap, dashboard
+from app.api.v1 import attendance, auth, schedule, karyawan, gps, rekap, dashboard, division
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 import os
@@ -45,6 +45,7 @@ app.include_router(karyawan.router, prefix="/api/v1/karyawan", tags=["Karyawan"]
 app.include_router(gps.router, prefix="/api/v1/gps", tags=["gps"])
 app.include_router(rekap.router, prefix="/api/v1/absens", tags=["Rekap"])
 app.include_router(dashboard.router, prefix="/api/v1/dashboard", tags=["Dashboard"])
+app.include_router(division.router, prefix="/api/v1")
 
 @app.get("/")
 def root():

@@ -19,10 +19,9 @@ from app.db.base import Base
 from app.core.config import settings
 
 # IMPORT SEMUA MODEL AGAR TERDETEKSI ALEMBIC
-from app.models.user import User, KaryawanDetail
-from app.models.attendance import Attendance
-from app.models.schedule import WorkSchedule
-# from app.models.office_location import OfficeLocation
+from app.models import (
+    User, KaryawanDetail, Division, SubDivision, Attendance, WorkSchedule, OfficeLocation
+)
 
 target_metadata = Base.metadata
 

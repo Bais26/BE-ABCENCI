@@ -1,14 +1,31 @@
 # app/routers/karyawan.py
 from fastapi import APIRouter, Depends, HTTPException, status, Query
 from sqlalchemy.orm import Session, joinedload
-from sqlalchemy import or_, and_
-from typing import List, Optional
+from sqlalchemy import or_, and_, func
+from typing import List, Optional, Any
 from uuid import UUID
 
+from pydantic import BaseModel, Field
 from app.core.database import get_db
-from app.models import User, KaryawanDetail, UserRole
+from app.models import User, KaryawanDetail, UserRole, SubDivision, Division
 from app.schemas.auth import UserWithDetailResponse, UserResponse, KaryawanDetailResponse, KaryawanDetailCreate, KaryawanDetailUpdate, PaginatedKaryawanResponse, PaginationMeta
 # from app.dependencies import get_current_user, get_current_admin_user  # Untuk authentication
+
+# --- Skema Input Baru untuk Creatable Select ---
+class DivisionRef(BaseModel):
+    id: Optional[UUID] = Field(None, description="ID Divisi yang sudah ada")
+    name: Optional[str] = Field(None, description="Nama Divisi baru jika belum ada")
+
+class SubDivisionRef(BaseModel):
+    id: Optional[UUID] = Field(None, description="ID Subdivisi yang sudah ada")
+    name: Optional[str] = Field(None, description="Nama Subdivisi baru jika belum ada")
+    division: Optional[DivisionRef] = Field(None, description="Divisi induk, wajib jika membuat subdivisi baru")
+
+class FullKaryawanUpdateRequest(BaseModel):
+    """Skema tunggal untuk membungkus semua data update dari frontend."""
+    detail: KaryawanDetailUpdate
+    subdivision: Optional[SubDivisionRef] = None 
+
 
 router = APIRouter(tags=["Karyawan"])
 
@@ -48,7 +65,9 @@ def get_all_karyawan(
     
     # Base query - hanya ambil user dengan role KARYAWAN
     query = db.query(User).options(
-        joinedload(User.karyawan_detail).joinedload(KaryawanDetail.division)
+        joinedload(User.karyawan_detail)
+        .joinedload(KaryawanDetail.subdivision)
+        .joinedload(SubDivision.division)
     ).filter(User.role == UserRole.KARYAWAN.value)
     
     # ✅ FILTERING
@@ -126,7 +145,9 @@ def get_karyawan_by_id(
 
     karyawan = (
         db.query(User)
-        .options(joinedload(User.karyawan_detail))
+        .options(
+            joinedload(User.karyawan_detail).joinedload(KaryawanDetail.subdivision).joinedload(SubDivision.division)
+        )
         .filter(
             User.id == karyawan_id,
             User.role == UserRole.KARYAWAN.value
@@ -140,54 +161,9 @@ def get_karyawan_by_id(
             detail="Karyawan not found"
         )
 
-    detail = karyawan.karyawan_detail
-    karyawan_detail_response = None
-    
-    division: Optional[DivisionResponse] = None
-
-    if detail:
-        from app.schemas.auth import KaryawanDetailResponse
-        karyawan_detail_response = KaryawanDetailResponse(
-            id=detail.id,
-            user_id=detail.user_id,
-            nama_depan=detail.nama_depan,
-            nama_belakang=detail.nama_belakang,
-            division={
-                "id": detail.division.id,
-                "name": detail.division.name
-            } if detail.division else None,
-            tanggal_lahir=detail.tanggal_lahir,
-            jenis_kelamin=detail.jenis_kelamin,
-            tinggi_badan=detail.tinggi_badan,
-            berat_badan=detail.berat_badan,
-            nama_alamat=detail.nama_alamat,
-            alamat_lengkap=detail.alamat_lengkap,
-            detail_alamat=detail.detail_alamat,
-            nama_kontak_darurat=detail.nama_kontak_darurat,
-            hubungan_kontak_darurat=detail.hubungan_kontak_darurat,
-            nomor_telepon_darurat=detail.nomor_telepon_darurat,
-            nama_bank=detail.nama_bank,
-            nomor_rekening=detail.nomor_rekening,
-            nama_pemilik_rekening=detail.nama_pemilik_rekening,
-            posisi=detail.posisi,
-            tanggal_masuk=detail.tanggal_masuk,
-            status=detail.status,
-            created_at=detail.created_at,
-            updated_at=detail.updated_at
-        )
-
-    return UserWithDetailResponse(
-        id=karyawan.id,
-        full_name=karyawan.full_name,
-        email=karyawan.email,
-        role=karyawan.role,
-        is_active=karyawan.is_active,
-        phone_number=karyawan.phone_number,
-        address=karyawan.address,
-        date_of_birth=karyawan.date_of_birth,
-        created_at=karyawan.created_at,
-        karyawan_detail=karyawan_detail_response
-    )
+    # Cukup kembalikan objek yang dibuat dari ORM.
+    # secara otomatis saat membuat objek dari model ORM.
+    return UserWithDetailResponse.from_orm(karyawan)
 
 
 # =====================================
@@ -245,12 +221,15 @@ def create_karyawan_detail(
 @router.put("/{karyawan_id}/detail", response_model=KaryawanDetailResponse)
 def update_karyawan_detail(
     karyawan_id: UUID,
-    detail: KaryawanDetailUpdate,
+    request_data: FullKaryawanUpdateRequest, # <-- Gunakan skema tunggal ini
     db: Session = Depends(get_db),
     # current_user: User = Depends(get_current_admin_user),  # ✅ Only admin can update
 ):
     """
-    Update karyawan detail
+    Update karyawan detail.
+    
+    Endpoint ini juga dapat menangani pembuatan Divisi/Subdivisi baru secara on-the-fly.
+    Kirim data subdivisi dalam body request terpisah atau sebagai bagian dari form-data.
     """
     # Cek apakah detail exists
     existing_detail = db.query(KaryawanDetail).filter(
@@ -263,8 +242,56 @@ def update_karyawan_detail(
             detail="Karyawan detail not found. Use POST to create."
         )
     
-    # Update hanya field yang di-provide (tidak None)
-    update_data = detail.model_dump(exclude_unset=True)
+    # --- Logika Baru untuk Menangani Subdivisi ---
+    subdivision_id_to_set = existing_detail.subdivision_id
+
+    # Ekstrak data dari skema baru
+    subdivision_input = request_data.subdivision
+
+    if subdivision_input:
+        # Jika membuat/mengubah subdivisi, divisi induknya diambil dari sini
+        division_ref_for_sub = subdivision_input.division
+        
+        # Kasus 1: ID subdivisi yang sudah ada diberikan
+        if subdivision_input.id:
+            subdivision_id_to_set = subdivision_input.id
+        # Kasus 2: Nama subdivisi baru diberikan
+        elif subdivision_input.name and division_ref_for_sub:
+            division_ref = division_ref_for_sub
+            parent_division = None
+            
+            # Cari atau buat Divisi induk
+            if division_ref.id:
+                parent_division = db.query(Division).filter(Division.id == division_ref.id).first()
+            elif division_ref.name:
+                parent_division = db.query(Division).filter(func.lower(Division.name) == division_ref.name.lower()).first()
+                if not parent_division:
+                    parent_division = Division(name=division_ref.name)
+                    db.add(parent_division)
+                    db.flush() # Dapatkan ID untuk divisi baru
+            
+            if not parent_division:
+                raise HTTPException(status_code=400, detail="Divisi induk tidak valid atau tidak ditemukan.")
+
+            # Cari atau buat Subdivisi
+            new_subdiv_name = subdivision_input.name
+            subdivision = db.query(SubDivision).filter(
+                func.lower(SubDivision.name) == new_subdiv_name.lower(),
+                SubDivision.division_id == parent_division.id
+            ).first()
+
+            if not subdivision:
+                subdivision = SubDivision(name=new_subdiv_name, division_id=parent_division.id)
+                db.add(subdivision)
+                db.flush() # Dapatkan ID untuk subdivisi baru
+            
+            subdivision_id_to_set = subdivision.id
+
+    # Set subdivision_id yang sudah ditentukan
+    existing_detail.subdivision_id = subdivision_id_to_set
+
+    # Update field lain dari KaryawanDetailUpdate
+    update_data = request_data.detail.model_dump(exclude_unset=True)
     
     for field, value in update_data.items():
         setattr(existing_detail, field, value)

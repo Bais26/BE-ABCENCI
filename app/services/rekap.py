@@ -1,6 +1,6 @@
 from sqlalchemy.orm import Session
 from sqlalchemy.orm import joinedload
-from typing import Optional, List
+from typing import Optional, List, Dict
 from datetime import datetime, date, timedelta, time as dt_time
 from uuid import UUID
 import pytz
@@ -8,7 +8,7 @@ import pytz
 from app.models.attendance import Attendance, AttendanceStatus, LocationType
 from app.models.user import User
 from app.models.karyawan_detail import KaryawanDetail
-from app.models.division import Division
+from app.models.division import Division, SubDivision
 from app.models.schedule import OfficeLocation
 from app.schemas.rekap import (
     DailyRekapItem,
@@ -101,7 +101,7 @@ def day_name_id(d: date) -> str:
 # OFFICE MAP
 # ══════════════════════════════════════════════════════════
 
-def get_office_map(db: Session, attendances: List[Attendance]) -> dict:
+def get_office_map(db: Session, attendances: List[Attendance]) -> Dict:
     """Ambil semua nama kantor sekaligus (1 query)."""
     ids = {a.office_location_id for a in attendances if a.office_location_id}
     if not ids:
@@ -188,19 +188,23 @@ def query_users(
     nama: Optional[str] = None,
     email: Optional[str] = None,
     divisi: Optional[str] = None,
+    subdivisi: Optional[str] = None,
     posisi: Optional[str] = None,
 ) -> List[User]:
     """
     Query User dengan filter opsional.
-    Eager-load karyawan_detail + division untuk menghindari N+1.
+    Eager-load karyawan_detail -> subdivision -> division untuk menghindari N+1.
     """
     q = (
         db.query(User)
         .outerjoin(User.karyawan_detail)
-        .outerjoin(KaryawanDetail.division)
+        .outerjoin(KaryawanDetail.subdivision)
+        .outerjoin(SubDivision.division)
         .filter(User.is_active == True)
         .options(
-            joinedload(User.karyawan_detail).joinedload(KaryawanDetail.division)
+            joinedload(User.karyawan_detail)
+            .joinedload(KaryawanDetail.subdivision)
+            .joinedload(SubDivision.division)
         )
     )
 
@@ -212,10 +216,12 @@ def query_users(
         q = q.filter(User.email.ilike(f"%{email}%"))
     if divisi:
         q = q.filter(Division.name.ilike(f"%{divisi}%"))
+    if subdivisi:
+        q = q.filter(SubDivision.name.ilike(f"%{subdivisi}%"))
     if posisi:
         q = q.filter(KaryawanDetail.posisi.ilike(f"%{posisi}%"))
 
-    return q.all()
+    return q # Kembalikan objek query, bukan hasilnya
 
 
 # ══════════════════════════════════════════════════════════
@@ -228,6 +234,12 @@ def build_karyawan_item(
     total_hari_kerja: int,
 ) -> KaryawanRekapItem:
     detail = user.karyawan_detail
+    divisi_name = None
+    subdivisi_name = None
+    if detail and detail.subdivision:
+        subdivisi_name = detail.subdivision.name
+        if detail.subdivision.division:
+            divisi_name = detail.subdivision.division.name
     total_hadir = len(attendances)
     total_alfa = max(0, total_hari_kerja - total_hadir)
     wfo = sum(1 for a in attendances if a.work_status == LocationType.WFO)
@@ -247,7 +259,8 @@ def build_karyawan_item(
         nama_lengkap=user.full_name,
         email=user.email,
         posisi=detail.posisi if detail else None,
-        divisi=detail.division.name if (detail and detail.division) else None,
+        divisi=divisi_name,
+        subdivisi=subdivisi_name,
         total_hadir=total_hadir,
         total_alfa=total_alfa,
         total_wfo=wfo,

@@ -16,7 +16,7 @@ router = APIRouter(dependencies=[Depends(get_current_admin)])
 def get_dashboard_data(
     filter: str = Query(
         "week",
-        regex="^(week|month|year)$",
+        pattern="^(week|month|year)$",
         description="Filter tren: week, month, year",
     ),
     year: Optional[int] = Query(None, description="Tahun untuk filter month/year"),
