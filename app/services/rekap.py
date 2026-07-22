@@ -70,7 +70,6 @@ def count_working_days(start: date, end: date) -> int:
         cur += timedelta(days=1)
     return count
 
-
 # ══════════════════════════════════════════════════════════
 # FORMAT HELPERS
 # ══════════════════════════════════════════════════════════
@@ -82,7 +81,6 @@ def fmt_time_wib(dt: Optional[datetime]) -> Optional[str]:
     local = dt.replace(tzinfo=pytz.utc).astimezone(JAKARTA_TZ)
     return local.strftime("%H:%M")
 
-
 def fmt_duration(minutes: Optional[int]) -> Optional[str]:
     """Konversi menit → string "Xj Ym"."""
     if minutes is None:
@@ -90,12 +88,10 @@ def fmt_duration(minutes: Optional[int]) -> Optional[str]:
     h, m = divmod(minutes, 60)
     return f"{h}j {m}m"
 
-
 def day_name_id(d: date) -> str:
     """Nama hari dalam Bahasa Indonesia."""
     DAYS = ["Senin", "Selasa", "Rabu", "Kamis", "Jumat", "Sabtu", "Minggu"]
     return DAYS[d.weekday()]
-
 
 # ══════════════════════════════════════════════════════════
 # OFFICE MAP
@@ -111,7 +107,6 @@ def get_office_map(db: Session, attendances: List[Attendance]) -> Dict:
         for o in db.query(OfficeLocation).filter(OfficeLocation.id.in_(ids)).all()
     }
 
-
 # ══════════════════════════════════════════════════════════
 # BUILD SUMMARY
 # ══════════════════════════════════════════════════════════
@@ -123,23 +118,90 @@ def build_summary(
     label: str,
     filter_type: str,
 ) -> RekapSummary:
+
     total_hari_kerja = count_working_days(start, end)
-    total_hadir = len(attendances)
-    # Untuk summary, 'total_alfa' dihitung dari selisih hari kerja dan total kehadiran.
-    # Pada rekap admin, ini akan menjadi total absensi dari semua karyawan yang difilter.
-    # Pada rekap personal, ini akan menjadi total alfa untuk satu karyawan.
-    total_alfa = max(0, total_hari_kerja - total_hadir)
-    wfo = sum(1 for a in attendances if a.work_status == LocationType.WFO)
-    wfh = sum(1 for a in attendances if a.work_status == LocationType.WFH)
-    ontime = sum(1 for a in attendances if a.check_in_status == AttendanceStatus.ONTIME)
-    terlambat = sum(1 for a in attendances if a.check_in_status == AttendanceStatus.LATE)
-    pulang_awal = sum(1 for a in attendances if a.check_out_status == AttendanceStatus.EARLY)
-    total_menit = sum(
-        a.work_duration_minutes for a in attendances if a.work_duration_minutes is not None
+
+    # ==========================
+    # STATUS KEHADIRAN
+    # ==========================
+
+    # ONTIME, LATE, EARLY tetap dianggap hadir
+    total_hadir = sum(
+        1
+        for a in attendances
+        if a.check_in_status in [
+            AttendanceStatus.ONTIME,
+            AttendanceStatus.LATE,
+            AttendanceStatus.EARLY
+        ]
     )
-    completed = [a for a in attendances if a.work_duration_minutes is not None]
-    rata = int(total_menit / len(completed)) if completed else None
-    rate = round(total_hadir / total_hari_kerja * 100, 2) if total_hari_kerja > 0 else 0.0
+
+    # ABSENT = Alfa
+    total_alfa = sum(
+        1
+        for a in attendances
+        if a.check_in_status == AttendanceStatus.ABSENT
+    )
+
+    total_wfo = sum(
+        1
+        for a in attendances
+        if a.work_status == LocationType.WFO
+    )
+
+    total_wfh = sum(
+        1
+        for a in attendances
+        if a.work_status == LocationType.WFH
+    )
+
+    total_ontime = sum(
+        1
+        for a in attendances
+        if a.check_in_status == AttendanceStatus.ONTIME
+    )
+
+    total_terlambat = sum(
+        1
+        for a in attendances
+        if a.check_in_status == AttendanceStatus.LATE
+    )
+
+    total_pulang_awal = sum(
+        1
+        for a in attendances
+        if a.check_out_status == AttendanceStatus.EARLY
+    )
+
+    # ==========================
+    # DURASI KERJA
+    # ==========================
+    total_menit = sum(
+        a.work_duration_minutes
+        for a in attendances
+        if a.work_duration_minutes is not None
+    )
+
+    completed = [
+        a
+        for a in attendances
+        if a.work_duration_minutes is not None
+    ]
+
+    rata = (
+        int(total_menit / len(completed))
+        if completed
+        else None
+    )
+
+    attendance_rate = (
+        round(
+            (total_hadir / len(attendances)) * 100,
+            2
+        )
+        if attendances
+        else 0.0
+    )
 
     return RekapSummary(
         periode=label,
@@ -147,14 +209,14 @@ def build_summary(
         total_hari_kerja=total_hari_kerja,
         total_hadir=total_hadir,
         total_alfa=total_alfa,
-        total_wfo=wfo,
-        total_wfh=wfh,
-        total_ontime=ontime,
-        total_terlambat=terlambat,
-        total_pulang_awal=pulang_awal,
+        total_wfo=total_wfo,
+        total_wfh=total_wfh,
+        total_ontime=total_ontime,
+        total_terlambat=total_terlambat,
+        total_pulang_awal=total_pulang_awal,
         total_menit_kerja=total_menit,
         rata_rata_menit_kerja=rata,
-        attendance_rate=rate,
+        attendance_rate=attendance_rate,
     )
 
 
@@ -240,8 +302,21 @@ def build_karyawan_item(
         subdivisi_name = detail.subdivision.name
         if detail.subdivision.division:
             divisi_name = detail.subdivision.division.name
-    total_hadir = len(attendances)
-    total_alfa = max(0, total_hari_kerja - total_hadir)
+    total_hadir = sum(
+        1
+        for a in attendances
+        if a.check_in_status in [
+            AttendanceStatus.ONTIME,
+            AttendanceStatus.LATE,
+            AttendanceStatus.EARLY
+        ]
+    )
+
+    total_alfa = sum(
+        1
+        for a in attendances
+        if a.check_in_status == AttendanceStatus.ABSENT
+    )
     wfo = sum(1 for a in attendances if a.work_status == LocationType.WFO)
     wfh = sum(1 for a in attendances if a.work_status == LocationType.WFH)
     ontime = sum(1 for a in attendances if a.check_in_status == AttendanceStatus.ONTIME)
@@ -252,7 +327,14 @@ def build_karyawan_item(
     )
     completed = [a for a in attendances if a.work_duration_minutes is not None]
     rata = int(total_menit / len(completed)) if completed else None
-    rate = round(total_hadir / total_hari_kerja * 100, 2) if total_hari_kerja > 0 else 0.0
+    rate = (
+        round(
+            (total_hadir / len(attendances)) * 100,
+            2
+        )
+        if attendances
+        else 0.0
+    )
 
     return KaryawanRekapItem(
         user_id=str(user.id),

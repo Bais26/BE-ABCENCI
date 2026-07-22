@@ -9,46 +9,177 @@ from app.models.attendance import Attendance, AttendanceStatus
 from app.models.karyawan_detail import KaryawanDetail
 from app.schemas.dashboard import TodaySummary, TrendPoint
 from app.services.rekap import JAKARTA_TZ, count_working_days
+from app.models.schedule import WorkSchedule
 
 
-def get_today_summary(db: Session) -> TodaySummary:
-    """Menghitung ringkasan kehadiran untuk hari ini."""
+def get_summary(
+    db: Session,
+    filter_type: str,
+    year: int,
+    month: int
+) -> TodaySummary:
+
     today = datetime.now(JAKARTA_TZ).date()
 
-    # 1. Hitung total karyawan aktif dan yang sedang cuti dalam satu query
-    karyawan_stats = db.query(
-        func.count(User.id),
-        func.count(case((KaryawanDetail.status == 'Cuti', User.id)))
-    ).select_from(User).outerjoin(User.karyawan_detail).filter(
+
+    # =========================
+    # TOTAL KARYAWAN AKTIF
+    # =========================
+
+    total_karyawan_aktif = db.query(
+        func.count(User.id)
+    ).filter(
         User.is_active == True,
         User.role == UserRole.KARYAWAN
-    ).one()
+    ).scalar()
 
-    total_karyawan_aktif = karyawan_stats[0]
-    karyawan_cuti = karyawan_stats[1]
-    
-    # 2. Ambil data absensi hari ini untuk menghitung hadir dan terlambat
-    attendances_today = db.query(
-        Attendance.check_in_status
+
+
+    # =========================
+    # RANGE FILTER
+    # =========================
+
+    if filter_type == "week":
+
+        start_date = today - timedelta(
+            days=today.weekday()
+        )
+
+        end_date = start_date + timedelta(days=6)
+
+
+    elif filter_type == "month":
+
+        start_date = date(
+            year,
+            month,
+            1
+        )
+
+        last_day = calendar.monthrange(
+            year,
+            month
+        )[1]
+
+        end_date = date(
+            year,
+            month,
+            last_day
+        )
+
+
+    elif filter_type == "year":
+
+        start_date = date(
+            year,
+            1,
+            1
+        )
+
+        end_date = date(
+            year,
+            12,
+            31
+        )
+
+
+    else:
+
+        start_date = today
+        end_date = today
+
+
+
+    start_dt = datetime.combine(
+        start_date,
+        datetime.min.time()
+    )
+
+
+    end_dt = datetime.combine(
+        end_date,
+        datetime.max.time()
+    )
+
+
+
+    # =========================
+    # ATTENDANCE
+    # =========================
+
+    attendances = db.query(
+        Attendance
     ).filter(
-        func.date(Attendance.date) == today
+        Attendance.date.between(
+            start_dt,
+            end_dt
+        )
     ).all()
 
-    total_hadir = len(attendances_today)
-    total_terlambat = sum(1 for att in attendances_today if att.check_in_status == AttendanceStatus.LATE)
 
-    # 3. Hitung alfa (Total karyawan aktif dikurangi yang sudah hadir)
-    # Karyawan yang seharusnya masuk (tidak cuti) dikurangi yang sudah hadir
-    karyawan_seharusnya_masuk = total_karyawan_aktif - karyawan_cuti
-    alfa_count = max(0, karyawan_seharusnya_masuk - total_hadir)
+
+    total_hadir = sum(
+        1
+        for att in attendances
+        if att.check_in_status in [
+            AttendanceStatus.ONTIME,
+            AttendanceStatus.LATE,
+            AttendanceStatus.EARLY
+        ]
+    )
+
+
+    total_terlambat = sum(
+        1
+        for att in attendances
+        if att.check_in_status == AttendanceStatus.LATE
+    )
+
+
+    total_alfa = sum(
+        1
+        for att in attendances
+        if att.check_in_status == AttendanceStatus.ABSENT
+    )
+
+
+
+    # =========================
+    # WORK SCHEDULE WFO WFH
+    # =========================
+
+    schedules = db.query(
+        WorkSchedule
+    ).filter(
+        WorkSchedule.date.between(
+            start_dt,
+            end_dt
+        )
+    ).all()
+
+
+
+    total_wfo = sum(
+        1
+        for schedule in schedules
+        if schedule.work_status.upper() == "WFO"
+    )
+
+
+    total_wfh = sum(
+        1
+        for schedule in schedules
+        if schedule.work_status.upper() == "WFH"
+    )
 
     return TodaySummary(
         total_karyawan_aktif=total_karyawan_aktif,
         total_hadir=total_hadir,
         total_terlambat=total_terlambat,
-        total_alfa=alfa_count
+        total_alfa=total_alfa,
+        total_wfo=total_wfo,
+        total_wfh=total_wfh
     )
-
 
 def get_attendance_trend(
     db: Session,
@@ -91,9 +222,26 @@ def get_attendance_trend(
                 Attendance.date.between(start_dt, end_dt)
             ).all()
             
-            hadir = len(attendances) # Jumlah baris = jumlah hadir
-            terlambat = sum(1 for att in attendances if att.check_in_status == AttendanceStatus.LATE)
-            alfa = max(0, karyawan_seharusnya_masuk - hadir)
+            hadir = sum(
+                1
+                for att in attendances
+                if att.check_in_status in [
+                    AttendanceStatus.ONTIME,
+                    AttendanceStatus.LATE,
+                    AttendanceStatus.EARLY
+                ]
+            )
+            terlambat = sum(
+                1
+                for att in attendances
+                if att.check_in_status == AttendanceStatus.LATE
+            )
+
+            alfa = sum(
+                1
+                for att in attendances
+                if att.check_in_status == AttendanceStatus.ABSENT
+            )
 
             trend_data.append(TrendPoint(label=labels[i], hadir=hadir, terlambat=terlambat, alfa=alfa))
 
@@ -124,10 +272,25 @@ def get_attendance_trend(
                 Attendance.date.between(start_dt, end_dt)
             ).all()
             
-            hadir = len(attendances) # Jumlah baris = jumlah hadir
-            terlambat = sum(1 for att in attendances if att.check_in_status == AttendanceStatus.LATE)
-            # Alfa dihitung dari karyawan yang seharusnya masuk
-            alfa = max(0, (karyawan_seharusnya_masuk * working_days) - hadir)
+            hadir = sum(
+                1
+                for att in attendances
+                if att.check_in_status == AttendanceStatus.ONTIME
+            )
+
+
+            terlambat = sum(
+                1
+                for att in attendances
+                if att.check_in_status == AttendanceStatus.LATE
+            )
+
+
+            alfa = sum(
+                1
+                for att in attendances
+                if att.check_in_status == AttendanceStatus.ABSENT
+            )
 
             trend_data.append(TrendPoint(label=f"W{week_num}", hadir=hadir, terlambat=terlambat, alfa=alfa))
 
@@ -146,11 +309,287 @@ def get_attendance_trend(
                 Attendance.date.between(start_dt, end_dt)
             ).all()
             
-            hadir = len(attendances) # Jumlah baris = jumlah hadir
-            terlambat = sum(1 for att in attendances if att.check_in_status == AttendanceStatus.LATE)
-            # Alfa dihitung dari karyawan yang seharusnya masuk
-            alfa = max(0, (karyawan_seharusnya_masuk * working_days) - hadir)
+            hadir = sum(
+                1
+                for att in attendances
+                if att.check_in_status == AttendanceStatus.ONTIME
+            )
+
+
+            terlambat = sum(
+                1
+                for att in attendances
+                if att.check_in_status == AttendanceStatus.LATE
+            )
+
+
+            alfa = sum(
+                1
+                for att in attendances
+                if att.check_in_status == AttendanceStatus.ABSENT
+            )
 
             trend_data.append(TrendPoint(label=labels[month_num-1], hadir=hadir, terlambat=terlambat, alfa=alfa))
+
+    return trend_data
+
+def get_work_mode_trend(
+    db: Session,
+    filter_type: str = "week",
+    year: int = None,
+    month: int = None
+):
+
+    trend_data = []
+
+
+    today = datetime.now(JAKARTA_TZ).date()
+
+
+
+    def count_work_mode(start_date, end_date):
+
+        schedules = db.query(
+            WorkSchedule.work_status
+        ).filter(
+            WorkSchedule.date.between(
+                start_date,
+                end_date
+            )
+        ).all()
+
+
+
+        wfo = sum(
+            1
+            for schedule in schedules
+            if schedule.work_status.upper() == "WFO"
+        )
+
+
+        wfh = sum(
+            1
+            for schedule in schedules
+            if schedule.work_status.upper() == "WFH"
+        )
+
+
+        return wfo, wfh
+
+
+
+    # =========================
+    # WEEK
+    # =========================
+
+    if filter_type == "week":
+
+
+        start_week = today - timedelta(
+            days=today.weekday()
+        )
+
+
+        labels = [
+            "Senin",
+            "Selasa",
+            "Rabu",
+            "Kamis",
+            "Jumat",
+            "Sabtu",
+            "Minggu"
+        ]
+
+
+        for i in range(7):
+
+            current_date = (
+                start_week +
+                timedelta(days=i)
+            )
+
+
+            start = datetime.combine(
+                current_date,
+                datetime.min.time()
+            )
+
+
+            end = datetime.combine(
+                current_date,
+                datetime.max.time()
+            )
+
+
+            wfo, wfh = count_work_mode(
+                start,
+                end
+            )
+
+
+            trend_data.append({
+
+                "label": labels[i],
+
+                "wfo": wfo,
+
+                "wfh": wfh
+
+            })
+
+
+
+
+    # =========================
+    # MONTH
+    # =========================
+
+    elif filter_type == "month":
+
+
+        if year is None:
+            year = today.year
+
+
+        if month is None:
+            month = today.month
+
+
+
+        total_days = calendar.monthrange(
+            year,
+            month
+        )[1]
+
+
+
+        for day in range(
+            1,
+            total_days + 1
+        ):
+
+
+            current_date = date(
+                year,
+                month,
+                day
+            )
+
+
+            start = datetime.combine(
+                current_date,
+                datetime.min.time()
+            )
+
+
+            end = datetime.combine(
+                current_date,
+                datetime.max.time()
+            )
+
+
+            wfo, wfh = count_work_mode(
+                start,
+                end
+            )
+
+
+            trend_data.append({
+
+                "label": str(day),
+
+                "wfo": wfo,
+
+                "wfh": wfh
+
+            })
+
+
+
+
+    # =========================
+    # YEAR
+    # =========================
+
+    elif filter_type == "year":
+
+
+        if year is None:
+            year = today.year
+
+
+
+        labels = [
+            "Jan",
+            "Feb",
+            "Mar",
+            "Apr",
+            "Mei",
+            "Jun",
+            "Jul",
+            "Agu",
+            "Sep",
+            "Okt",
+            "Nov",
+            "Des"
+        ]
+
+
+
+        for month_num in range(1,13):
+
+
+            start_date = date(
+                year,
+                month_num,
+                1
+            )
+
+
+            last_day = calendar.monthrange(
+                year,
+                month_num
+            )[1]
+
+
+            end_date = date(
+                year,
+                month_num,
+                last_day
+            )
+
+
+
+            start = datetime.combine(
+                start_date,
+                datetime.min.time()
+            )
+
+
+            end = datetime.combine(
+                end_date,
+                datetime.max.time()
+            )
+
+
+
+            wfo, wfh = count_work_mode(
+                start,
+                end
+            )
+
+
+
+            trend_data.append({
+
+                "label": labels[month_num-1],
+
+                "wfo": wfo,
+
+                "wfh": wfh
+
+            })
+
+
 
     return trend_data

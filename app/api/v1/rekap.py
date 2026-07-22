@@ -6,10 +6,10 @@ from datetime import datetime, time as dt_time
 from app.core.database import get_db
 from app.utils.security import get_current_user, get_current_admin
 from app.models.user import User
-from app.models.attendance import Attendance, LocationType
 # from app.models import Attendance, LocationType, SubDivision, Division
 from app.models.karyawan_detail import KaryawanDetail
 from app.schemas.rekap import MyRekapResponse, AdminRekapResponse
+from app.models.attendance import Attendance, LocationType, AttendanceStatus
 from app.services.rekap import (
     get_date_range,
     count_working_days,
@@ -187,7 +187,11 @@ async def get_admin_rekap(
 
         # Buat summary dengan data agregat
         summary = build_summary(all_attendances_for_summary, start, end, label, filter)
-        summary.total_alfa = total_alfa_agregat # Timpa total_alfa dengan nilai agregat yang lebih akurat
+        summary.total_alfa = sum(
+            1
+            for att in all_attendances_for_summary
+            if att.check_in_status == AttendanceStatus.ABSENT
+        )
 
         # ── 4. Pagination pada list user untuk tampilan per halaman ──
         offset = (page - 1) * limit

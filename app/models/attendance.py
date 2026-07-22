@@ -27,7 +27,11 @@ class Attendance(Base):
     check_in_time = Column(DateTime)
     check_in_lat = Column(Float)
     check_in_lng = Column(Float)
-    check_in_status = Column(Enum(AttendanceStatus))
+    check_in_status = Column(
+        Enum(AttendanceStatus),
+        default=AttendanceStatus.ABSENT,
+        nullable=False
+    )
     check_in_location_type = Column(Enum(LocationType))
     
     # Check-out data

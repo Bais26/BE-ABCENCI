@@ -1,23 +1,30 @@
-from pydantic import BaseModel, ConfigDict
-from typing import List, Optional
+from pydantic import BaseModel
+from typing import List
 
 
 class TodaySummary(BaseModel):
-    """Ringkasan kehadiran untuk hari ini."""
     total_karyawan_aktif: int
     total_hadir: int
     total_terlambat: int
     total_alfa: int
+    total_wfo: int
+    total_wfh: int
 
 
 class TrendPoint(BaseModel):
-    """Satu titik data dalam grafik tren."""
-    label: str  # Contoh: "Senin", "W1", "Jan"
+    label: str
     hadir: int
     terlambat: int
     alfa: int
 
+
+class WorkModeTrend(BaseModel):
+    label: str
+    wfo: int
+    wfh: int
+
+
 class DashboardResponse(BaseModel):
-    """Skema respons utama untuk endpoint dashboard."""
     today_summary: TodaySummary
     attendance_trend: List[TrendPoint]
+    work_mode_trend: List[WorkModeTrend]
