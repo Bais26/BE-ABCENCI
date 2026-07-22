@@ -175,7 +175,9 @@ async def get_admin_rekap(
 
         # ── 3. Hitung summary berdasarkan data keseluruhan ──
         # Kalkulasi total alfa agregat untuk summary
-        karyawan_cuti = users_query.join(KaryawanDetail).filter(KaryawanDetail.status == 'Cuti').count()
+        karyawan_cuti = users_query.filter(
+        KaryawanDetail.status == "Cuti"
+        ).count()
 
         total_hari_kerja_periode = count_working_days(start, end)
         # Total hari kerja yang diharapkan adalah untuk karyawan yang tidak cuti

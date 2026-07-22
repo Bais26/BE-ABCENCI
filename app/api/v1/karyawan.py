@@ -1,4 +1,3 @@
-# app/routers/karyawan.py
 from fastapi import APIRouter, Depends, HTTPException, status, Query
 from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import or_, and_, func
@@ -71,21 +70,17 @@ def get_all_karyawan(
     ).filter(User.role == UserRole.KARYAWAN.value)
     
     # ✅ FILTERING
-    needs_detail_join = False
     if search:
         search_filter = or_(
             User.full_name.ilike(f"%{search}%"),
             User.email.ilike(f"%{search}%")
         )
         query = query.filter(search_filter)
+    # Karena sudah ada joinedload, kita bisa langsung filter
     if status:
-        needs_detail_join = True
         query = query.filter(KaryawanDetail.status == status)
     if posisi:
-        needs_detail_join = True
         query = query.filter(KaryawanDetail.posisi.ilike(f"%{posisi}%"))
-    if needs_detail_join:
-        query = query.join(KaryawanDetail, User.id == KaryawanDetail.user_id, isouter=True)
     
     # ✅ SORTING
     sort_field_map = {
@@ -96,9 +91,8 @@ def get_all_karyawan(
         "status": KaryawanDetail.status,
     }
 
-    # Jika sorting butuh join ke KaryawanDetail, pastikan join ada
-    if sort_by in ["posisi", "status"] and not needs_detail_join:
-        query = query.join(KaryawanDetail, User.id == KaryawanDetail.user_id, isouter=True)
+    # Join eksplisit tidak lagi diperlukan karena joinedload sudah menangani ini.
+    # SQLAlchemy cukup pintar untuk menggunakan join yang ada untuk sorting.
 
     sort_column = sort_field_map.get(sort_by, User.created_at)
 

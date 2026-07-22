@@ -7,6 +7,7 @@ load_dotenv()
 class Settings:
     # Application
     APP_NAME = os.getenv("APP_NAME", "Absensi API")
+    FRONTEND_URL = os.getenv("FRONTEND_URL", "http://localhost:3000") # <-- TAMBAHKAN INI
     DATABASE_URL = os.getenv("DATABASE_URL")
     BACKEND_URL = os.getenv("BACKEND_URL")
     

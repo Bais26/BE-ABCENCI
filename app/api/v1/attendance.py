@@ -71,7 +71,7 @@ async def check_in(
         validation_details = {}
         office_location = None
         
-        if str(schedule.work_status.value).upper() == "WFO":
+        if str(schedule.work_status).upper() == "WFO":
             # WFO requires GPS validation
             if not schedule.office_location_id:
                 raise HTTPException(
@@ -115,7 +115,7 @@ async def check_in(
                     detail=f"Anda berada di luar radius {office_location.radius}m dari {office_location.name}. Jarak: {distance:.1f}m"
                 )
         
-        elif schedule.work_status.value == "WFH":
+        elif schedule.work_status.upper() == "WFH":
             # No GPS validation required for WFH
             is_valid_location = True
             validation_details = {
@@ -163,13 +163,14 @@ async def check_in(
             user_id=current_user.id,
             date=datetime.utcnow(),
             check_in_time=check_in_time,
-            check_in_lat=request.latitude if schedule.work_status == LocationType.WFO else None,
-            check_in_lng=request.longitude if schedule.work_status == LocationType.WFO else None,
+            check_in_lat=request.latitude if schedule.work_status.upper() == "WFO" else None,
+            check_in_lng=request.longitude if schedule.work_status.upper() == "WFO" else None,
+            is_validated=(schedule.work_status.upper() == "WFH"),
             check_in_status=check_in_status,
             check_in_location_type=schedule.work_status,
             work_status=schedule.work_status,
             office_location_id=schedule.office_location_id,
-            is_validated=(schedule.work_status == LocationType.WFH),  # Auto-validate WFH
+            # is_validated=(schedule.work_status == LocationType.WFH),  # Auto-validate WFH
             validation_note=validation_details.get("note", "Validated by system")
         )
         

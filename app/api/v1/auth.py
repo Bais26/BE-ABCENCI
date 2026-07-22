@@ -87,7 +87,7 @@ async def register(
     token = create_token({"email": user.email}, 30)
 
     fm = get_mail_client()
-    verify_url = f"{settings.BACKEND_URL}/api/v1/auth/verify?token={token}"
+    verify_url = f"{settings.FRONTEND_URL}/api/v1/auth/verify?token={token}"
 
     message = MessageSchema(
         subject="Verifikasi Email",
@@ -184,7 +184,11 @@ async def forgot_password(
     token = create_token({"email": user.email}, 15)
 
     fm = get_mail_client()
-    reset_url = f"{settings.BACKEND_URL}/api/v1/auth/reset-password?token={token}"
+    # NOTE: Ubah ke BACKEND_URL hanya untuk kemudahan testing tanpa frontend.
+    # Kembalikan ke FRONTEND_URL sebelum production.
+    # Tautan ini akan menampilkan token di browser, yang bisa di-copy-paste ke Postman.
+    # reset_url = f"{settings.FRONTEND_URL}/api/v1/auth/reset-password?token={token}"
+    reset_url = f"{settings.FRONTEND_URL}/reset-password?token={token}"
     message = MessageSchema(
         subject="Reset Password",
         recipients=[user.email],
@@ -212,9 +216,19 @@ def reset_password(
     if data.password != data.confirm_password:
         raise HTTPException(400, "Password tidak sama")
 
-    payload = jwt.decode(token, settings.SECRET_KEY, algorithms=[settings.ALGORITHM])
-    user = db.query(User).filter(User.email == payload["email"]).first()
+    try:
+        payload = jwt.decode(
+            token, settings.SECRET_KEY, algorithms=[settings.ALGORITHM]
+        )
+        email = payload.get("email")
+        if not email:
+            raise HTTPException(status_code=400, detail="Token tidak valid atau tidak berisi email.")
+    except ExpiredSignatureError:
+        raise HTTPException(status_code=400, detail="Tautan reset password sudah kedaluwarsa. Silakan minta yang baru.")
+    except JWTError:
+        raise HTTPException(status_code=400, detail="Token tidak valid atau rusak.")
 
+    user = db.query(User).filter(User.email == email).first()
     if not user:
         raise HTTPException(404, "User tidak ditemukan")
 
