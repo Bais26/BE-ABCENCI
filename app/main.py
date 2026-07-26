@@ -15,9 +15,22 @@ DATABASE_URL = os.getenv("DATABASE_URL")
 
 engine = create_engine(settings.DATABASE_URL, echo=True)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
-cred = credentials.Certificate(
-    "app/absencbn-firebase-adminsdk-fbsvc-e99bff9d00.json"
-)
+
+# cred = credentials.Certificate(
+#     "app/absencbn-firebase-adminsdk-fbsvc-e99bff9d00.json"
+# )
+if os.getenv("VERCEL"):
+    firebase_json = json.loads(os.environ["FIREBASE_CREDENTIALS"])
+
+    with tempfile.NamedTemporaryFile(mode="w", delete=False, suffix=".json") as f:
+        json.dump(firebase_json, f)
+        temp_path = f.name
+
+    cred = credentials.Certificate(temp_path)
+else:
+    cred = credentials.Certificate(
+        "app/absencbn-firebase-adminsdk-fbsvc-e99bff9d00.json"
+    )
 # Pastikan firebase hanya diinisialisasi sekali
 if not firebase_admin._apps:
     firebase_admin.initialize_app(cred)
