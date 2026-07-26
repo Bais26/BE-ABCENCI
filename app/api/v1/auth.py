@@ -87,7 +87,7 @@ async def register(
     token = create_token({"email": user.email}, 30)
 
     fm = get_mail_client()
-    verify_url = build_url(settings.FRONTEND_URL, "/api/v1/auth/verify") + f"?token={token}"
+    verify_url = build_url(settings.BACKEND_URL, "/api/v1/auth/verify") + f"?token={token}"
 
     message = MessageSchema(
         subject="Verifikasi Email",
@@ -249,7 +249,7 @@ async def resend_verification(
     token = create_token({"email": user.email}, 30)
 
     fm = get_mail_client()
-    verify_url = build_url(settings.FRONTEND_URL, "/api/v1/auth/verify") + f"?token={token}"
+    verify_url = build_url(settings.BACKEND_URL, "/api/v1/auth/verify") + f"?token={token}"
 
     message = MessageSchema(
         subject="Verifikasi Email",
