@@ -8,6 +8,8 @@ from dotenv import load_dotenv
 from fastapi.middleware.cors import CORSMiddleware
 import firebase_admin
 from firebase_admin import credentials
+import json
+import tempfile
 
 DATABASE_URL = os.getenv("DATABASE_URL")
 
