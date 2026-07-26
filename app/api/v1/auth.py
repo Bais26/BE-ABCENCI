@@ -87,7 +87,7 @@ async def register(
     token = create_token({"email": user.email}, 30)
 
     fm = get_mail_client()
-    verify_url = f"{settings.FRONTEND_URL}/api/v1/auth/verify?token={token}"
+    verify_url = build_url(settings.FRONTEND_URL, "/api/v1/auth/verify") + f"?token={token}"
 
     message = MessageSchema(
         subject="Verifikasi Email",
@@ -181,14 +181,11 @@ async def forgot_password(
     if not user:
         raise HTTPException(404, "Email tidak ditemukan")
 
-    token = create_token({"email": user.email}, 15)
+    token = create_token({"email": user.email}, 15)   # ✅ diindentasi sejajar
 
     fm = get_mail_client()
-    # NOTE: Ubah ke BACKEND_URL hanya untuk kemudahan testing tanpa frontend.
-    # Kembalikan ke FRONTEND_URL sebelum production.
-    # Tautan ini akan menampilkan token di browser, yang bisa di-copy-paste ke Postman.
-    # reset_url = f"{settings.FRONTEND_URL}/api/v1/auth/reset-password?token={token}"
-    reset_url = f"{settings.FRONTEND_URL}/reset-password?token={token}"
+    reset_url = build_url(settings.FRONTEND_URL, "/reset-password") + f"?token={token}"
+
     message = MessageSchema(
         subject="Reset Password",
         recipients=[user.email],
@@ -200,11 +197,9 @@ async def forgot_password(
         ),
         subtype="plain"
     )
-
     await fm.send_message(message)
 
     return {"message": "Link reset password dikirim ke email"}
-
 
 # RESET PASSWORD
 @router.post("/reset-password")
@@ -254,6 +249,7 @@ async def resend_verification(
     token = create_token({"email": user.email}, 30)
 
     fm = get_mail_client()
+    verify_url = build_url(settings.FRONTEND_URL, "/api/v1/auth/verify") + f"?token={token}"
 
     message = MessageSchema(
         subject="Verifikasi Email",
@@ -261,7 +257,7 @@ async def resend_verification(
         body=(
             f"Halo {user.full_name},\n\n"
             f"Klik link berikut untuk verifikasi akun kamu:\n"
-            f"http://localhost:8000/api/v1/auth/verify?token={token}\n\n"
+            f"{verify_url}\n\n"
             f"Abaikan jika ini bukan kamu."
         ),
         subtype="plain"

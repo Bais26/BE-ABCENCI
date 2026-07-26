@@ -57,3 +57,6 @@ def get_current_admin(current_user: User = Depends(get_current_user)) -> User:
             detail="The user does not have admin privileges"
         )
     return current_user
+    
+def build_url(base: str, path: str) -> str:
+    return f"{base.rstrip('/')}/{path.lstrip('/')}"
