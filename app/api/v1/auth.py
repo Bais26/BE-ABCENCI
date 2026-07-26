@@ -8,6 +8,7 @@ from app.utils.security import *
 from app.core.email import get_mail_client
 from app.core.config import settings
 from fastapi_mail import MessageSchema
+from fastapi.responses import HTMLResponse
 
 router = APIRouter()
 
@@ -109,7 +110,7 @@ async def register(
 
 
 # VERIFY EMAIL
-@router.get("/verify")
+@router.get("/verify", response_class=HTMLResponse)
 def verify_email(token: str, db: Session = Depends(get_db)):
     try:
         payload = jwt.decode(
@@ -118,18 +119,112 @@ def verify_email(token: str, db: Session = Depends(get_db)):
             algorithms=[settings.ALGORITHM],
         )
     except ExpiredSignatureError:
-        raise HTTPException(400, "Token sudah kedaluwarsa")
+        return _verify_page(
+            success=False,
+            title="Link Kedaluwarsa",
+            message="Link verifikasi ini sudah tidak berlaku. Silakan minta link verifikasi baru dari aplikasi."
+        )
     except JWTError:
-        raise HTTPException(400, "Token tidak valid")
+        return _verify_page(
+            success=False,
+            title="Link Tidak Valid",
+            message="Link verifikasi ini tidak valid atau rusak."
+        )
 
     user = db.query(User).filter(User.email == payload.get("email")).first()
     if not user:
-        raise HTTPException(404, "User tidak ditemukan")
+        return _verify_page(
+            success=False,
+            title="Akun Tidak Ditemukan",
+            message="Akun dengan email ini tidak ditemukan."
+        )
 
     user.is_active = True
     db.commit()
 
-    return {"message": "Email berhasil diverifikasi"}
+    return _verify_page(
+        success=True,
+        title="Email Berhasil Diverifikasi!",
+        message="Akun kamu sudah aktif. Silakan kembali ke aplikasi dan login."
+    )
+
+
+def _verify_page(success: bool, title: str, message: str) -> str:
+    color = "#22c55e" if success else "#ef4444"
+    icon = "✓" if success else "✕"
+
+    return f"""
+    <!DOCTYPE html>
+    <html lang="id">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>{title}</title>
+        <style>
+            * {{ margin: 0; padding: 0; box-sizing: border-box; }}
+            body {{
+                font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+                background: #0f172a;
+                min-height: 100vh;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                padding: 24px;
+            }}
+            .card {{
+                background: #ffffff;
+                border-radius: 20px;
+                padding: 40px 28px;
+                max-width: 380px;
+                width: 100%;
+                text-align: center;
+                box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+            }}
+            .icon-circle {{
+                width: 72px;
+                height: 72px;
+                border-radius: 50%;
+                background: {color}1f;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                margin: 0 auto 20px;
+            }}
+            .icon {{
+                font-size: 32px;
+                color: {color};
+                font-weight: bold;
+            }}
+            h1 {{
+                font-size: 20px;
+                color: #0f172a;
+                margin-bottom: 10px;
+                font-weight: 800;
+            }}
+            p {{
+                font-size: 14px;
+                color: #64748b;
+                line-height: 1.6;
+            }}
+            .footer {{
+                margin-top: 24px;
+                font-size: 12px;
+                color: #94a3b8;
+            }}
+        </style>
+    </head>
+    <body>
+        <div class="card">
+            <div class="icon-circle">
+                <span class="icon">{icon}</span>
+            </div>
+            <h1>{title}</h1>
+            <p>{message}</p>
+            <div class="footer">© BlitzWork</div>
+        </div>
+    </body>
+    </html>
+    """
 
 # LOGIN
 @router.post("/login")
