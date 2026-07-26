@@ -11,6 +11,60 @@ from app.schemas.dashboard import TodaySummary, TrendPoint
 from app.services.rekap import JAKARTA_TZ, count_working_days
 from app.models.schedule import WorkSchedule
 
+def get_attendance_stats(
+    db: Session,
+    start_dt: datetime,
+    end_dt: datetime
+):
+    """
+    Menghitung Hadir, Terlambat, Alfa berdasarkan
+    Schedule vs Attendance.
+    """
+
+    schedules = db.query(
+        WorkSchedule.user_id,
+        func.date(WorkSchedule.date).label("work_date")
+    ).filter(
+        WorkSchedule.date.between(start_dt, end_dt)
+    ).all()
+
+    schedule_set = {
+        (s.user_id, s.work_date)
+        for s in schedules
+    }
+
+    attendances = db.query(
+        Attendance.user_id,
+        func.date(Attendance.date).label("work_date"),
+        Attendance.check_in_status
+    ).filter(
+        Attendance.date.between(start_dt, end_dt)
+    ).all()
+
+    attendance_set = {
+        (a.user_id, a.work_date)
+        for a in attendances
+    }
+
+    hadir = len({
+        (a.user_id, a.work_date)
+        for a in attendances
+        if a.check_in_status in (
+            AttendanceStatus.ONTIME,
+            AttendanceStatus.EARLY,
+            AttendanceStatus.LATE,
+        )
+    })
+
+    terlambat = len({
+        (a.user_id, a.work_date)
+        for a in attendances
+        if a.check_in_status == AttendanceStatus.LATE
+    })
+
+    alfa = len(schedule_set - attendance_set)
+
+    return hadir, terlambat, alfa
 
 def get_summary(
     db: Session,
@@ -107,43 +161,11 @@ def get_summary(
     # ATTENDANCE
     # =========================
 
-    attendances = db.query(
-        Attendance
-    ).filter(
-        Attendance.date.between(
-            start_dt,
-            end_dt
-        )
-    ).all()
-
-
-
-    total_hadir = sum(
-        1
-        for att in attendances
-        if att.check_in_status in [
-            AttendanceStatus.ONTIME,
-            AttendanceStatus.LATE,
-            AttendanceStatus.EARLY
-        ]
+    total_hadir, total_terlambat, total_alfa = get_attendance_stats(
+        db,
+        start_dt,
+        end_dt
     )
-
-
-    total_terlambat = sum(
-        1
-        for att in attendances
-        if att.check_in_status == AttendanceStatus.LATE
-    )
-
-
-    total_alfa = sum(
-        1
-        for att in attendances
-        if att.check_in_status == AttendanceStatus.ABSENT
-    )
-
-
-
     # =========================
     # WORK SCHEDULE WFO WFH
     # =========================
@@ -198,9 +220,9 @@ def get_attendance_trend(
         User.role == UserRole.KARYAWAN
     ).one()
 
-    total_karyawan_aktif = karyawan_stats[0]
-    karyawan_cuti = karyawan_stats[1]
-    karyawan_seharusnya_masuk = total_karyawan_aktif - karyawan_cuti
+    # total_karyawan_aktif = karyawan_stats[0]
+    # karyawan_cuti = karyawan_stats[1]
+    # karyawan_seharusnya_masuk = total_karyawan_aktif - karyawan_cuti
     
     trend_data = []
 
@@ -218,29 +240,10 @@ def get_attendance_trend(
             end_dt = datetime.combine(period_date, datetime.max.time())
 
             # Query hanya kolom yang dibutuhkan
-            attendances = db.query(Attendance.check_in_status).filter(
-                Attendance.date.between(start_dt, end_dt)
-            ).all()
-            
-            hadir = sum(
-                1
-                for att in attendances
-                if att.check_in_status in [
-                    AttendanceStatus.ONTIME,
-                    AttendanceStatus.LATE,
-                    AttendanceStatus.EARLY
-                ]
-            )
-            terlambat = sum(
-                1
-                for att in attendances
-                if att.check_in_status == AttendanceStatus.LATE
-            )
-
-            alfa = sum(
-                1
-                for att in attendances
-                if att.check_in_status == AttendanceStatus.ABSENT
+            hadir, terlambat, alfa = get_attendance_stats(
+                db,
+                start_dt,
+                end_dt
             )
 
             trend_data.append(TrendPoint(label=labels[i], hadir=hadir, terlambat=terlambat, alfa=alfa))
@@ -268,28 +271,10 @@ def get_attendance_trend(
             if working_days == 0: continue
 
             # Query hanya kolom yang dibutuhkan
-            attendances = db.query(Attendance.check_in_status).filter(
-                Attendance.date.between(start_dt, end_dt)
-            ).all()
-            
-            hadir = sum(
-                1
-                for att in attendances
-                if att.check_in_status == AttendanceStatus.ONTIME
-            )
-
-
-            terlambat = sum(
-                1
-                for att in attendances
-                if att.check_in_status == AttendanceStatus.LATE
-            )
-
-
-            alfa = sum(
-                1
-                for att in attendances
-                if att.check_in_status == AttendanceStatus.ABSENT
+            hadir, terlambat, alfa = get_attendance_stats(
+                db,
+                start_dt,
+                end_dt
             )
 
             trend_data.append(TrendPoint(label=f"W{week_num}", hadir=hadir, terlambat=terlambat, alfa=alfa))
@@ -305,28 +290,10 @@ def get_attendance_trend(
             if working_days == 0: continue
 
             # Query hanya kolom yang dibutuhkan
-            attendances = db.query(Attendance.check_in_status).filter(
-                Attendance.date.between(start_dt, end_dt)
-            ).all()
-            
-            hadir = sum(
-                1
-                for att in attendances
-                if att.check_in_status == AttendanceStatus.ONTIME
-            )
-
-
-            terlambat = sum(
-                1
-                for att in attendances
-                if att.check_in_status == AttendanceStatus.LATE
-            )
-
-
-            alfa = sum(
-                1
-                for att in attendances
-                if att.check_in_status == AttendanceStatus.ABSENT
+            hadir, terlambat, alfa = get_attendance_stats(
+                db,
+                start_dt,
+                end_dt
             )
 
             trend_data.append(TrendPoint(label=labels[month_num-1], hadir=hadir, terlambat=terlambat, alfa=alfa))
