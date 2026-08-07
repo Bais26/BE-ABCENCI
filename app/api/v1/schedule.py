@@ -355,7 +355,6 @@ async def generate_schedule(
             )
         
         try:
-            # Call genetic algorithm service
             schedule_result = generate_work_schedule(db, schedule_data)
             logger.info(f"Algoritma genetika berhasil membuat jadwal untuk {len(schedule_result)} karyawan.")
             
@@ -373,7 +372,6 @@ async def generate_schedule(
             )
             logger.info(f"Generator fallback berhasil membuat jadwal untuk {len(schedule_result)} karyawan.")
         
-        # Clear existing schedules for the date range
         karyawan_ids = [user.id for user in karyawan_users]
         
         deleted_count = db.query(WorkSchedule).filter(
@@ -384,7 +382,6 @@ async def generate_schedule(
         
         logger.info(f"Menghapus {deleted_count} jadwal lama pada rentang tanggal yang sama.")
         
-        # Save new schedules
         schedules_to_create = []
         work_status_counts = {"WFO": 0, "WFH": 0, "OFF": 0}
         
@@ -414,7 +411,6 @@ async def generate_schedule(
         logger.info(f"Membuat {len(schedules_to_create)} entri jadwal baru.")
         logger.info(f"Distribusi status kerja: {work_status_counts}")
         
-        # Save to database
         if schedules_to_create:
             db.bulk_save_objects(schedules_to_create)
             db.commit()

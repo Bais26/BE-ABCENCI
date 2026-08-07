@@ -23,7 +23,8 @@ def get_attendance_stats(
 
     schedules = db.query(
         WorkSchedule.user_id,
-        func.date(WorkSchedule.date).label("work_date")
+        func.date(WorkSchedule.date).label("work_date"),
+        WorkSchedule.work_status,
     ).filter(
         WorkSchedule.date.between(start_dt, end_dt)
     ).all()
@@ -31,6 +32,7 @@ def get_attendance_stats(
     schedule_set = {
         (s.user_id, s.work_date)
         for s in schedules
+        if (s.work_status or "").upper() in ("WFO", "WFH")
     }
 
     attendances = db.query(
@@ -103,7 +105,6 @@ def get_summary(
 
 
     elif filter_type == "month":
-
         start_date = date(
             year,
             month,
@@ -142,7 +143,7 @@ def get_summary(
         start_date = today
         end_date = today
 
-
+    end_date = min(end_date, today)
 
     start_dt = datetime.combine(
         start_date,

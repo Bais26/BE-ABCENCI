@@ -15,6 +15,8 @@ from app.schemas.rekap import (
     RekapSummary,
     KaryawanRekapItem,
 )
+from app.models.schedule import WorkSchedule
+
 
 JAKARTA_TZ = pytz.timezone("Asia/Jakarta")
 
@@ -22,6 +24,36 @@ JAKARTA_TZ = pytz.timezone("Asia/Jakarta")
 # ══════════════════════════════════════════════════════════
 # DATE HELPERS
 # ══════════════════════════════════════════════════════════
+
+def get_schedule_map(
+    db: Session,
+    user_ids: List,
+    start: date,
+    end: date,
+) -> Dict:
+    """
+    Ambil jadwal kerja (WFO/WFH saja, OFF dikecualikan) per user.
+    Return: { user_id: { tanggal: "WFO" | "WFH" } }
+    """
+    start_dt = datetime.combine(start, dt_time.min)
+    end_dt = datetime.combine(end, dt_time.max)
+
+    rows = (
+        db.query(WorkSchedule.user_id, WorkSchedule.date, WorkSchedule.work_status)
+        .filter(
+            WorkSchedule.user_id.in_(user_ids),
+            WorkSchedule.date.between(start_dt, end_dt),
+        )
+        .all()
+    )
+
+    schedule_map: Dict = {uid: {} for uid in user_ids}
+    for r in rows:
+        status = (r.work_status or "").upper()
+        if status in ("WFO", "WFH"):
+            d = r.date.date() if isinstance(r.date, datetime) else r.date
+            schedule_map.setdefault(r.user_id, {})[d] = status
+    return schedule_map
 
 def get_date_range(
     filter_type: str,
@@ -113,6 +145,7 @@ def get_office_map(db: Session, attendances: List[Attendance]) -> Dict:
 
 def build_summary(
     attendances: List[Attendance],
+    schedule_map: Dict,   # 👈 { user_id: { tanggal: "WFO"/"WFH" } }
     start: date,
     end: date,
     label: str,
@@ -121,87 +154,38 @@ def build_summary(
 
     total_hari_kerja = count_working_days(start, end)
 
-    # ==========================
-    # STATUS KEHADIRAN
-    # ==========================
-
-    # ONTIME, LATE, EARLY tetap dianggap hadir
-    total_hadir = sum(
-        1
+    attended = {
+        (a.user_id, a.date.date() if isinstance(a.date, datetime) else a.date)
         for a in attendances
         if a.check_in_status in [
             AttendanceStatus.ONTIME,
             AttendanceStatus.LATE,
-            AttendanceStatus.EARLY
+            AttendanceStatus.EARLY,
         ]
-    )
+    }
+    total_hadir = len(attended)
 
-    # ABSENT = Alfa
-    total_alfa = sum(
-        1
-        for a in attendances
-        if a.check_in_status == AttendanceStatus.ABSENT
-    )
+    expected = {(uid, d) for uid, dates in schedule_map.items() for d in dates}
+    total_alfa = len(expected - attended)
 
+    # 👇 WFO/WFH dari jadwal
     total_wfo = sum(
-        1
-        for a in attendances
-        if a.work_status == LocationType.WFO
+        1 for dates in schedule_map.values() for status in dates.values() if status == "WFO"
     )
-
     total_wfh = sum(
-        1
-        for a in attendances
-        if a.work_status == LocationType.WFH
+        1 for dates in schedule_map.values() for status in dates.values() if status == "WFH"
     )
 
-    total_ontime = sum(
-        1
-        for a in attendances
-        if a.check_in_status == AttendanceStatus.ONTIME
-    )
+    total_ontime = sum(1 for a in attendances if a.check_in_status == AttendanceStatus.ONTIME)
+    total_terlambat = sum(1 for a in attendances if a.check_in_status == AttendanceStatus.LATE)
+    total_pulang_awal = sum(1 for a in attendances if a.check_out_status == AttendanceStatus.EARLY)
 
-    total_terlambat = sum(
-        1
-        for a in attendances
-        if a.check_in_status == AttendanceStatus.LATE
-    )
+    total_menit = sum(a.work_duration_minutes for a in attendances if a.work_duration_minutes is not None)
+    completed = [a for a in attendances if a.work_duration_minutes is not None]
+    rata = int(total_menit / len(completed)) if completed else None
 
-    total_pulang_awal = sum(
-        1
-        for a in attendances
-        if a.check_out_status == AttendanceStatus.EARLY
-    )
-
-    # ==========================
-    # DURASI KERJA
-    # ==========================
-    total_menit = sum(
-        a.work_duration_minutes
-        for a in attendances
-        if a.work_duration_minutes is not None
-    )
-
-    completed = [
-        a
-        for a in attendances
-        if a.work_duration_minutes is not None
-    ]
-
-    rata = (
-        int(total_menit / len(completed))
-        if completed
-        else None
-    )
-
-    attendance_rate = (
-        round(
-            (total_hadir / len(attendances)) * 100,
-            2
-        )
-        if attendances
-        else 0.0
-    )
+    total_expected = len(expected)
+    attendance_rate = round((total_hadir / total_expected) * 100, 2) if total_expected else 0.0
 
     return RekapSummary(
         periode=label,
@@ -293,7 +277,7 @@ def query_users(
 def build_karyawan_item(
     user: User,
     attendances: List[Attendance],
-    total_hari_kerja: int,
+    schedule: Dict,   # 👈 sekarang { tanggal: "WFO"/"WFH" }, bukan set
 ) -> KaryawanRekapItem:
     detail = user.karyawan_detail
     divisi_name = None
@@ -302,39 +286,34 @@ def build_karyawan_item(
         subdivisi_name = detail.subdivision.name
         if detail.subdivision.division:
             divisi_name = detail.subdivision.division.name
-    total_hadir = sum(
-        1
+
+    expected_dates = set(schedule.keys())
+
+    attended_dates = {
+        (a.date.date() if isinstance(a.date, datetime) else a.date)
         for a in attendances
         if a.check_in_status in [
             AttendanceStatus.ONTIME,
             AttendanceStatus.LATE,
-            AttendanceStatus.EARLY
+            AttendanceStatus.EARLY,
         ]
-    )
+    }
+    total_hadir = len(attended_dates)
+    total_alfa = len(expected_dates - attended_dates)
 
-    total_alfa = sum(
-        1
-        for a in attendances
-        if a.check_in_status == AttendanceStatus.ABSENT
-    )
-    wfo = sum(1 for a in attendances if a.work_status == LocationType.WFO)
-    wfh = sum(1 for a in attendances if a.work_status == LocationType.WFH)
+    # 👇 WFO/WFH dihitung dari JADWAL (bukan attendance), supaya alfa tetap terhitung
+    total_wfo = sum(1 for status in schedule.values() if status == "WFO")
+    total_wfh = sum(1 for status in schedule.values() if status == "WFH")
+
     ontime = sum(1 for a in attendances if a.check_in_status == AttendanceStatus.ONTIME)
     terlambat = sum(1 for a in attendances if a.check_in_status == AttendanceStatus.LATE)
     pulang_awal = sum(1 for a in attendances if a.check_out_status == AttendanceStatus.EARLY)
-    total_menit = sum(
-        a.work_duration_minutes for a in attendances if a.work_duration_minutes is not None
-    )
+    total_menit = sum(a.work_duration_minutes for a in attendances if a.work_duration_minutes is not None)
     completed = [a for a in attendances if a.work_duration_minutes is not None]
     rata = int(total_menit / len(completed)) if completed else None
-    rate = (
-        round(
-            (total_hadir / len(attendances)) * 100,
-            2
-        )
-        if attendances
-        else 0.0
-    )
+
+    total_hari_wajib = len(expected_dates)
+    rate = round((total_hadir / total_hari_wajib) * 100, 2) if total_hari_wajib else 0.0
 
     return KaryawanRekapItem(
         user_id=str(user.id),
@@ -345,8 +324,8 @@ def build_karyawan_item(
         subdivisi=subdivisi_name,
         total_hadir=total_hadir,
         total_alfa=total_alfa,
-        total_wfo=wfo,
-        total_wfh=wfh,
+        total_wfo=total_wfo,
+        total_wfh=total_wfh,
         total_ontime=ontime,
         total_terlambat=terlambat,
         total_pulang_awal=pulang_awal,

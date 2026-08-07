@@ -18,6 +18,7 @@ from app.services.rekap import (
     to_daily_item,
     query_users,
     build_karyawan_item,
+    get_schedule_map,
     JAKARTA_TZ,
 )
 
@@ -41,6 +42,7 @@ async def get_my_rekap(
     week: Optional[int] = Query(None, ge=1, le=53, description="Nomor minggu ISO (hanya untuk filter=week)"),
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
+    
 ):
     """
     Rekap absensi milik karyawan yang sedang login.
@@ -72,9 +74,10 @@ async def get_my_rekap(
             .order_by(Attendance.date.asc())
             .all()
         )
+        schedule_map = get_schedule_map(db, [current_user.id], start, end)  
 
         office_map = get_office_map(db, attendances)
-        summary = build_summary(attendances, start, end, label, filter)
+        summary = build_summary(attendances, schedule_map, start, end, label, filter)
         detail = [to_daily_item(a, office_map.get(a.office_location_id)) for a in attendances]
 
         return MyRekapResponse(summary=summary, detail=detail)
@@ -161,7 +164,10 @@ async def get_admin_rekap(
         total_karyawan = users_query.count()
 
         # ── 2. Ambil SEMUA attendance untuk SEMUA user yang cocok filter (untuk summary) ──
-        all_user_ids = [u.id for u in users_query.all()] # Ambil semua ID untuk summary
+        all_user_ids = [u.id for u in users_query.all()]
+
+        schedule_map = get_schedule_map(db, all_user_ids, start, end)   # 👈 baru
+
         summary_att_query = db.query(Attendance).filter(
             Attendance.user_id.in_(all_user_ids),
             Attendance.date >= datetime.combine(start, datetime.min.time()),
@@ -170,43 +176,25 @@ async def get_admin_rekap(
         if work_status:
             loc = LocationType.WFO if work_status == "WFO" else LocationType.WFH
             summary_att_query = summary_att_query.filter(Attendance.work_status == loc)
-        
+
         all_attendances_for_summary = summary_att_query.all()
 
-        # ── 3. Hitung summary berdasarkan data keseluruhan ──
-        # Kalkulasi total alfa agregat untuk summary
-        karyawan_cuti = users_query.filter(
-        KaryawanDetail.status == "Cuti"
-        ).count()
+        summary = build_summary(all_attendances_for_summary, schedule_map, start, end, label, filter)  # 👈 tambah schedule_map
 
-        total_hari_kerja_periode = count_working_days(start, end)
-        # Total hari kerja yang diharapkan adalah untuk karyawan yang tidak cuti
-        total_expected_workdays_all_users = total_hari_kerja_periode * (total_karyawan - karyawan_cuti)
-        total_actual_attendances_all_users = len(all_attendances_for_summary)
-        total_alfa_agregat = max(0, total_expected_workdays_all_users - total_actual_attendances_all_users)
-
-        # Buat summary dengan data agregat
-        summary = build_summary(all_attendances_for_summary, start, end, label, filter)
-        summary.total_alfa = sum(
-            1
-            for att in all_attendances_for_summary
-            if att.check_in_status == AttendanceStatus.ABSENT
-        )
-
-        # ── 4. Pagination pada list user untuk tampilan per halaman ──
         offset = (page - 1) * limit
         paged_users = users_query.offset(offset).limit(limit).all()
 
-        # ── 5. Kelompokkan attendance per user (dari data summary) untuk efisiensi ──
         att_by_user: dict = {u.id: [] for u in paged_users}
         for a in all_attendances_for_summary:
             if a.user_id in att_by_user:
                 att_by_user[a.user_id].append(a)
 
-        # ── 6. Bangun list rekap per karyawan untuk halaman saat ini ──
-        total_hari_kerja = count_working_days(start, end)
         karyawan_list = [
-            build_karyawan_item(user, att_by_user.get(user.id, []), total_hari_kerja)
+            build_karyawan_item(
+                user,
+                att_by_user.get(user.id, []),
+                schedule_map.get(user.id, {}),   # 👈 ganti total_hari_kerja jadi expected_dates
+            )
             for user in paged_users
         ]
 

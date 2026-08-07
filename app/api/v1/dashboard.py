@@ -28,7 +28,6 @@ def get_dashboard_data(
         description="Filter attendance: week, month, year"
     ),
 
-
     mode_filter: str = Query(
         "week",
         pattern="^(week|month|year)$",
